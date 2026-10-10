@@ -123,3 +123,13 @@ def describe_industry(induty_code: str) -> str:
     if name:
         return f"{name} (업종코드 {code})"
     return f"업종코드 {code}"
+
+
+def industry_name(induty_code: str) -> str | None:
+    code = (induty_code or "").strip()
+    return KSIC_SUBCLASSES.get(code[:3]) or KSIC_DIVISIONS.get(code[:2])
+
+
+def is_financial_division(induty_code: str) -> bool:
+    """KSIC 중분류 64·65·66(금융·보험). 금융 세트 판정의 첫 조건."""
+    return (induty_code or "").strip()[:2] in {"64", "65", "66"}
