@@ -25,7 +25,8 @@ async def corp_list(dart: DartClient) -> list[dict]:
     for el in ET.fromstring(xml).iter("list"):
         stock = (el.findtext("stock_code") or "").strip()
         rows.append({"corp_code": el.findtext("corp_code"), "corp_name": (el.findtext("corp_name") or "").strip(),
-                     "stock_code": stock or None})
+                     "corp_eng_name": (el.findtext("corp_eng_name") or "").strip(),
+                     "modify_date": (el.findtext("modify_date") or "").strip(), "stock_code": stock or None})
     await cache.set("dart.corplist", "all", rows, ttl_s=DAY)
     return rows
 
@@ -64,3 +65,14 @@ async def get_profile(dart: DartClient, corp_code: str) -> CorpProfile:
     return CorpProfile(corp_code=corp_code, corp_name=hit.get("corp_name") or hit.get("stock_name") or corp_code,
                        stock_code=(hit.get("stock_code") or "").strip() or None, corp_cls=hit.get("corp_cls"),
                        induty_code=hit.get("induty_code"), acc_mt=int(acc) if acc.isdigit() else None)
+
+
+async def search_keyword(dart: DartClient, keyword: str, limit: int = 50) -> list[dict]:
+    """/financial/corp_list용: 이름에 키워드가 든 회사(상장사·짧은 이름 먼저)."""
+    rows = await corp_list(dart)
+    nq = _norm(keyword)
+    if not nq:
+        return []
+    hits = [r for r in rows if nq in _norm(r["corp_name"])]
+    hits.sort(key=lambda r: (_norm(r["corp_name"]) != nq, r["stock_code"] is None, len(r["corp_name"])))
+    return hits[:limit]
