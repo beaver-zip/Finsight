@@ -16,3 +16,7 @@ dist/
 .idea/
 frontends/*/.env
 .claude/
+
+# v2 런타임 데이터(응답 캐시·비용 장부·체크포인터)
+backends/data/cache/
+backends/data/*.sqlite*
