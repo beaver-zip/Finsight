@@ -52,9 +52,15 @@ class DartClient:
                     last = DartError("800", "시스템 점검")
                     continue
                 return r
-            except (httpx.TransportError, httpx.HTTPStatusError) as e:
-                last = e
-                log.warning("OpenDART %s 재시도 %d: %s", path, attempt + 1, e)
+            except httpx.HTTPStatusError as e:
+                # 예외 메시지에는 인증키가 든 URL이 있으므로 그대로 올리거나 기록하지 않는다
+                code = e.response.status_code
+                to = e.response.headers.get("location", "")
+                last = DartError(str(code), f"HTTP {code}{' → ' + to if to else ''} ({path})")
+                log.warning("OpenDART %s 재시도 %d: HTTP %s %s", path, attempt + 1, code, to)
+            except httpx.TransportError as e:
+                last = DartError("net", f"{type(e).__name__} ({path})")
+                log.warning("OpenDART %s 재시도 %d: %s", path, attempt + 1, type(e).__name__)
         assert last is not None
         raise last
 
