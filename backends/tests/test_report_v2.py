@@ -170,10 +170,11 @@ def _m(i, t):
     ("{{a.x}}으로", "55.1%로"), ("{{b.x}}을", "3.04배를"), ("{{d.x}}으로", "51일로"), ("{{e.x}} 하락함", "35% 하락함"),
     ("{{g.x}} 증가함", "782.5% 증가함"), ("{{h.x}} 늘어", "45.3조원 늘어"), ("{{j.x}}였으며", "105.5조원이었으며"),
     ("{{k.x}}가 적자", "8,188억원이 적자"), ("QoQ {{g.x}},", "QoQ +782.5%,"), ("{{m.x}}함", "1.8% 상회함"),
-    ("{{h.x}} 변화함", "45.3조원 증가함")])
+    ("{{h.x}} 변화함", "45.3조원 증가함"), ("{{n.x}} 적자였음", "8,188억원 적자였음"), ("{{n.x}}의 영업손실", "8,188억원의 영업손실")])
 def test_slot_tidy(src, want):
     f = {k + ".x": _m(k, v) for k, v in dict(a="55.1%", b="3.04배", d="51일", e="35% 하락", g="+782.5%",
-                                             h="45.3조원 증가", j="105.5조원", k="8,188억원", m="1.8% 상회").items()}
+                                             h="45.3조원 증가", j="105.5조원", k="8,188억원", m="1.8% 상회",
+                                             n="-8,188억원").items()}
     assert render(src, f) == want
 
 
@@ -271,3 +272,20 @@ def test_ret_between_and_clean_title():
     assert ret_between(px, 365) == pytest.approx((499 / 134 - 1) * 100)
     assert clean_title("삼성전자, 실적 발표 - 조선비즈", "조선비즈") == "삼성전자, 실적 발표"
     assert clean_title("A - B 합병 추진", "x") == "A - B 합병 추진"
+
+
+async def test_dart_cached_uses_stale_value_when_dart_fails(temp_cache):
+    from app.core.dart.client import DartError, cached
+
+    async def boom():
+        raise DartError("302", "HTTP 302 → /error.html (list.json)")
+
+    async def fresh():
+        return [2]
+
+    await temp_cache.set("ns", "k", [1], ttl_s=-1)            # 이미 만료된 값
+    assert await cached("ns", "k", 60, boom) == [1]          # 원천 실패 → 만료 값
+    assert await cached("ns", "k", 60, fresh) == [2]         # 원천 성공 → 갱신
+    assert await cached("ns", "k", 60, boom) == [2]          # 유효한 캐시는 원천을 부르지 않는다
+    with pytest.raises(DartError):
+        await cached("ns", "missing", 60, boom)

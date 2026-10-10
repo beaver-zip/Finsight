@@ -6,7 +6,7 @@ import zipfile
 from xml.etree import ElementTree as ET
 
 from app.core.cache import get_cache
-from app.core.dart.client import DartClient
+from app.core.dart.client import DartClient, cached
 from app.domain.models import CorpProfile
 
 DAY = 86_400
@@ -56,11 +56,7 @@ async def find_candidates(dart: DartClient, query: str, limit: int = 5) -> list[
 
 
 async def get_profile(dart: DartClient, corp_code: str) -> CorpProfile:
-    cache = get_cache()
-    hit = await cache.get("dart.company", corp_code)
-    if hit is None:
-        hit = await dart.json("company", corp_code=corp_code)
-        await cache.set("dart.company", corp_code, hit, ttl_s=DAY)
+    hit = await cached("dart.company", corp_code, DAY, lambda: dart.json("company", corp_code=corp_code))
     acc = (hit.get("acc_mt") or "").strip()
     return CorpProfile(corp_code=corp_code, corp_name=hit.get("corp_name") or hit.get("stock_name") or corp_code,
                        stock_code=(hit.get("stock_code") or "").strip() or None, corp_cls=hit.get("corp_cls"),

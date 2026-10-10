@@ -109,6 +109,8 @@ def tidy(display_text: str, after: str) -> tuple[str, str]:
         after = re.sub(r"^\s*변화", "", after)
     elif re.match(r"^[+\-−]\d", display_text) and _SIGN_VERB.match(after):
         display_text = display_text[1:]
+    elif re.match(r"^[\-−]\d", display_text) and re.match(r"\s*(?:의\s*)?(?:영업)?(?:적자|손실)", after):
+        display_text = display_text[1:]                  # '-8,188억원 적자' → '8,188억원 적자'
     return display_text, josa(display_text, after)
 
 

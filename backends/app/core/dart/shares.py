@@ -5,7 +5,7 @@ import logging
 from dataclasses import dataclass
 
 from app.core.cache import get_cache
-from app.core.dart.client import DartClient, DartNoData
+from app.core.dart.client import DartClient, DartNoData, cached
 
 log = logging.getLogger(__name__)
 MAX_SHARES = 7_000_000_000   # 국내 최다인 삼성전자 보통주 발행주식이 약 59억 주
@@ -132,15 +132,12 @@ def _kdate(s: str | None) -> str | None:
 
 async def buyback_decisions(dart: DartClient, corp_code: str, bgn: str, end: str) -> list[BuybackDecision]:
     """bgn·end: YYYYMMDD. 1시간 캐시."""
-    cache = get_cache()
-    key = f"tsstkAqDecsn:{corp_code}:{bgn}:{end}"
-    rows = await cache.get("dart.sh", key)
-    if rows is None:
+    async def fetch() -> list[dict]:
         try:
-            rows = (await dart.json("tsstkAqDecsn", corp_code=corp_code, bgn_de=bgn, end_de=end)).get("list", [])
+            return (await dart.json("tsstkAqDecsn", corp_code=corp_code, bgn_de=bgn, end_de=end)).get("list", [])
         except DartNoData:
-            rows = []
-        await cache.set("dart.sh", key, rows, ttl_s=3600)
+            return []
+    rows = await cached("dart.sh", f"tsstkAqDecsn:{corp_code}:{bgn}:{end}", 3600, fetch)
     out = [BuybackDecision(r["rcept_no"], _kdate(r.get("aq_dd")), _int(r.get("aqpln_stk_ostk")),
                            _int(r.get("aqpln_prc_ostk")), _kdate(r.get("aqexpd_bgd")), _kdate(r.get("aqexpd_edd")),
                            (r.get("aq_pp") or "").strip() or None, (r.get("aq_mth") or "").strip() or None)

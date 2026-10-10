@@ -4,8 +4,8 @@ from __future__ import annotations
 import re
 from datetime import date, datetime, timedelta
 
-from app.core.cache import get_cache, make_key
-from app.core.dart.client import DartClient, DartNoData
+from app.core.cache import make_key
+from app.core.dart.client import DartClient, DartNoData, cached
 from app.domain.models import CorpProfile, Disclosure, PeriodicFiling
 
 HOUR = 3_600
@@ -20,24 +20,21 @@ async def _list(dart: DartClient, *, corp_code: str, bgn: date, end: date, pblnt
                 last_reprt_at: str = "Y") -> list[dict]:
     params = dict(corp_code=corp_code, bgn_de=bgn.strftime("%Y%m%d"), end_de=end.strftime("%Y%m%d"),
                   pblntf_ty=pblntf_ty, last_reprt_at=last_reprt_at)
-    key = make_key(params)
-    cache = get_cache()
-    hit = await cache.get("dart.list", key)
-    if hit is not None:
-        return hit
-    rows: list[dict] = []
-    page = 1
-    while True:
-        try:
-            data = await dart.json("list", **params, page_no=page, page_count=100)
-        except DartNoData:
-            break
-        rows += data.get("list", [])
-        if page >= int(data.get("total_page", 1)):
-            break
-        page += 1
-    await cache.set("dart.list", key, rows, ttl_s=HOUR)
-    return rows
+    async def fetch() -> list[dict]:
+        rows: list[dict] = []
+        page = 1
+        while True:
+            try:
+                data = await dart.json("list", **params, page_no=page, page_count=100)
+            except DartNoData:
+                break
+            rows += data.get("list", [])
+            if page >= int(data.get("total_page", 1)):
+                break
+            page += 1
+        return rows
+
+    return await cached("dart.list", make_key(params), HOUR, fetch)
 
 
 def parse_report_name(report_nm: str, acc_mt: int | None) -> tuple[int, str] | None:

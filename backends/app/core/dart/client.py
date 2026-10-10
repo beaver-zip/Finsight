@@ -1,6 +1,7 @@
 """OpenDART HTTP 클라이언트. 상태 코드 처리와 재시도만 맡는다(캐시는 호출하는 모듈이 키를 정해 쓴다).
 
 상태 코드: 000 정상, 013 데이터 없음, 020 요청 한도 초과(재시도하지 않음), 800 시스템 점검(재시도).
+HTTP 5xx·네트워크 오류는 재시도하고, 3xx·4xx(점검·접속 제한 페이지로 돌려보내는 302 등)는 바로 실패한다.
 """
 from __future__ import annotations
 
@@ -57,7 +58,9 @@ class DartClient:
                 code = e.response.status_code
                 to = e.response.headers.get("location", "")
                 last = DartError(str(code), f"HTTP {code}{' → ' + to if to else ''} ({path})")
-                log.warning("OpenDART %s 재시도 %d: HTTP %s %s", path, attempt + 1, code, to)
+                log.warning("OpenDART %s 실패 %d: HTTP %s %s", path, attempt + 1, code, to)
+                if code < 500:          # 3xx·4xx(점검·접속 제한 페이지 등)는 다시 불러도 같다
+                    break
             except httpx.TransportError as e:
                 last = DartError("net", f"{type(e).__name__} ({path})")
                 log.warning("OpenDART %s 재시도 %d: %s", path, attempt + 1, type(e).__name__)
@@ -83,6 +86,26 @@ class DartClient:
         if status is not None and status != "000":
             raise DartLimit(status, "요청 한도 초과") if status == "020" else DartError(status, _xml_message(r))
         return r.content
+
+
+async def cached(namespace: str, key: str, ttl_s: float | None, fetch):
+    """캐시 → 없거나 만료면 fetch. OpenDART가 실패하면(점검·접속 제한·한도) 만료된 값이라도 있으면 쓴다.
+    목록·기업개황처럼 자주 바뀌지 않는 응답에만 쓴다."""
+    from app.core.cache import get_cache
+
+    cache = get_cache()
+    hit = await cache.peek(namespace, key)
+    if hit is not None and not hit[1]:
+        return hit[0]
+    try:
+        value = await fetch()
+    except DartError as e:
+        if hit is not None:
+            log.warning("OpenDART 실패(%s), 만료된 캐시를 쓴다: %s", e, namespace)
+            return hit[0]
+        raise
+    await cache.set(namespace, key, value, ttl_s=ttl_s)
+    return value
 
 
 def _status_of(path: str, r: httpx.Response) -> str | None:
