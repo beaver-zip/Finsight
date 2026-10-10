@@ -17,6 +17,9 @@ from app.deps import AppState
 from app.settings import get_settings
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+# httpx는 INFO에서 요청 URL을 남긴다. OpenDART·법제처 URL에는 인증키가 들어 있으므로 올리지 않는다
+for _name in ("httpx", "httpcore", "httpx2"):
+    logging.getLogger(_name).setLevel(logging.WARNING)
 
 
 @asynccontextmanager

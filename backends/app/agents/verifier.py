@@ -1,6 +1,6 @@
 """검증 노드: 추적 불가 숫자, 인용 존재, 근거 인용문, 주장 지지, 투자 권유를 검사한다.
 
-리포트(ConclusionDraft)와 채팅(FinalAnswer.claims)이 같은 함수를 쓴다. 주장은 Claim.id로 가리킨다.
+리포트(ReportDraft.claims())와 채팅(FinalAnswer.claims)이 같은 함수를 쓴다. 주장은 Claim.id로 가리킨다.
 """
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 from app.core import llm
-from app.domain.binding import display, missing_slots, slots_in, untraceable_numbers
+from app.domain.binding import SLOT, display, missing_slots, slots_in, untraceable_numbers
 from app.domain.models import Claim, LegalFinding, Metric, NewsItem, VerificationIssue, VerificationResult
 
 ADVICE = re.compile(r"매수|매도|목표\s*주가|목표가|비중\s*(?:확대|축소)|투자\s*추천|사야|팔아야")
@@ -25,6 +25,7 @@ class Evidence:
     news: dict[str, NewsItem] = field(default_factory=dict)          # "n1" → NewsItem
     news_text: dict[str, str] = field(default_factory=dict)          # "n1" → 본문(또는 스니펫)
     legal: dict[str, str] = field(default_factory=dict)              # 조문 key → 본문
+    tokens: set[str] = field(default_factory=set)                    # 리포트에 보이는 숫자 토큰(사실표·차트 제목)
 
     @classmethod
     def build(cls, metrics: dict[str, Metric], news: list[NewsItem], news_text: dict[str, str],
@@ -52,7 +53,7 @@ class _AdviceList(BaseModel):
     items: list[_Advice]
 
 
-SUPPORT_SYSTEM = """너는 기업 분석 리포트의 사실 검증자다. 주장마다 함께 준 근거(지표 값, 기사 요약·인용문, 조문)만 보고 판정한다.
+SUPPORT_SYSTEM = """너는 기업 분석 리포트의 사실 검증자다. 주장마다 함께 준 근거(지표 값, 기사 요약·인용문·본문 조각, 조문)만 보고 판정한다.
 support = 근거가 주장 전체를 뒷받침, partial = 일부만 뒷받침(과장, 근거에 없는 원인·전망 추가 포함),
 unrelated = 근거가 주장과 무관하거나 근거가 없음. partial이면 missing에 근거에 없는 부분을 한 문장으로 적는다.
 {{…}} 슬롯은 함께 준 지표 값으로 읽는다. 일반적인 해석·모니터링 제안은 근거 지표와 맞으면 support다."""
@@ -80,7 +81,7 @@ def deterministic_checks(claims: list[Claim], ev: Evidence) -> list[Verification
     for c in claims:
         for s in missing_slots(c.text, ev.metrics):
             issues.append(VerificationIssue(claim_id=c.id, type="missing_slot", detail=f"없는 슬롯 {{{{{s}}}}}"))
-        bad = untraceable_numbers(c.text, _sources_for(c, ev))
+        bad = untraceable_numbers(c.text, _sources_for(c, ev), ev.tokens)
         if bad:
             issues.append(VerificationIssue(claim_id=c.id, type="untraceable_number",
                                             detail=f"슬롯·출처 밖 숫자: {', '.join(bad)}"))
@@ -100,6 +101,28 @@ def deterministic_checks(claims: list[Claim], ev: Evidence) -> list[Verification
     return issues
 
 
+def _excerpt_for(claim: str, body: str, width: int = 360, limit: int = 1800) -> str:
+    """주장에 나온 숫자·명사 주변의 기사 본문 조각(판정 근거). 못 찾으면 본문 앞부분."""
+    if not body:
+        return ""
+    keys = {t for t in re.findall(r"[0-9][0-9,.]*|[가-힣A-Za-z]{2,}", SLOT.sub(" ", claim)) if len(t) >= 2}
+    spans = []
+    for k in keys:
+        i = body.find(k)
+        if i >= 0:
+            spans.append((max(0, i - width // 2), min(len(body), i + len(k) + width // 2)))
+    if not spans:
+        return body[:limit]
+    spans.sort()
+    merged: list[list[int]] = []
+    for a, b in spans:
+        if merged and a <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], b)
+        else:
+            merged.append([a, b])
+    return " … ".join(body[a:b] for a, b in merged)[:limit]
+
+
 def _evidence_block(c: Claim, ev: Evidence) -> dict:
     metrics = {s: f"{ev.metrics[s].label}({ev.metrics[s].period}) = {display(ev.metrics[s])}"
                for s in set(slots_in(c.text)) | set(c.metric_ids) if s in ev.metrics}
@@ -108,7 +131,8 @@ def _evidence_block(c: Claim, ev: Evidence) -> dict:
         n = ev.news.get(nid)
         if n:
             news[nid] = {"title": n.title, "summary": n.analysis.summary if n.analysis else [],
-                         "evidence": n.analysis.evidence if n.analysis else None}
+                         "evidence": n.analysis.evidence if n.analysis else None,
+                         "excerpt": _excerpt_for(c.text, ev.news_text.get(nid, ""))}
     legal = {k: ev.legal[k][:1500] for k in c.legal_keys if k in ev.legal}
     return {"claim_id": c.id, "claim": c.text, "metrics": metrics, "news": news, "legal": legal}
 
