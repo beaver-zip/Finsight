@@ -11,6 +11,7 @@ SLOT = re.compile(r"\{\{\s*([A-Za-z0-9_]+\.[A-Za-z0-9]+)\s*\}\}")
 NEWS_REF = re.compile(r"\[(n\d+)\]")
 NUMBER = re.compile(r"\d[\d,.]*")
 _DATE_SUFFIX = ("년", "월", "일", "분기", "반기")
+GROWTH_IDS = {"revenue_growth", "op_income_growth", "net_income_growth"}
 _ARTICLE = re.compile(r"제\s*(\d+)\s*(?:조(?:의\s*(\d+))?|항|호)")
 _ANNEX = re.compile(r"별표\s*(\d+)(?:\s*의\s*(\d+))?")
 
@@ -23,7 +24,10 @@ def display(m: Metric) -> str:
     """표시 단계 반올림: 비율(%) 소수 첫째 자리, 배수 소수 둘째 자리, 금액 억 원 단위 정수."""
     if m.value is None:
         return m.note or "—"
-    if m.unit == "%":
+    if m.unit == "%" and m.id in GROWTH_IDS:
+        v = _q(m.value, '0.1')
+        s = f"{abs(v)}% {'증가' if v >= 0 else '감소'}"
+    elif m.unit == "%":
         s = f"{_q(m.value, '0.1')}%"
     elif m.unit == "x":
         s = f"{_q(m.value, '0.01')}배"
