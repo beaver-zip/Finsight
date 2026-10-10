@@ -35,9 +35,10 @@ const HtmlWithScriptsRenderer = ({ htmlString }: { htmlString: string }) => {
       link.setAttribute("rel", "noopener noreferrer"); // For security
     });
 
-    // 재무제표처럼 열이 많은 표는 가로 스크롤 컨테이너로 감싼다
+    // 재무제표처럼 열이 많은 표는 가로 스크롤 컨테이너로 감싼다(v2 리포트는 자체 스크롤 컨테이너가 있다)
     Array.from(tempDiv.querySelectorAll("table")).forEach((table) => {
       if (table.parentElement?.classList.contains("table-wrap")) return;
+      if (table.closest(".fs-report")) return;
       const wrap = document.createElement("div");
       wrap.className = "table-wrap";
       table.parentElement?.insertBefore(wrap, table);
@@ -91,7 +92,9 @@ const HtmlWithScriptsRenderer = ({ htmlString }: { htmlString: string }) => {
     };
   }, [htmlString]);
 
-  return <div ref={containerRef} className="report-body w-full" />;
+  // v2 리포트(.fs-report)는 자체 스타일을 내장하므로 기존 report-body 스타일을 씌우지 않는다
+  const isV2 = htmlString.includes('class="fs-report"');
+  return <div ref={containerRef} className={isV2 ? "w-full" : "report-body w-full"} />;
 };
 
 // 메시지 타입 정의
@@ -190,6 +193,7 @@ function Report() {
 
   // ---------- 보고서 결과 화면 ----------
   if (reportStatus === "success" && reportHtml) {
+    const isV2Report = reportHtml.includes('class="fs-report"');
     return (
       <div className="flex min-h-screen w-full flex-col bg-ink-50 font-sans">
         <header className="sticky top-0 z-20 border-b border-ink-200 bg-white">
@@ -226,13 +230,22 @@ function Report() {
         </header>
 
         <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-8 sm:px-6">
-          <article className="rounded-2xl border border-ink-200 bg-white p-6 shadow-card sm:p-10">
+          {/* v2 리포트는 자체 여백·머리말·면책 문구를 갖고 있어 카드 안쪽 여백과 아래 문구를 뺀다 */}
+          <article
+            className={
+              isV2Report
+                ? "overflow-hidden rounded-2xl border border-ink-200 bg-white shadow-card"
+                : "rounded-2xl border border-ink-200 bg-white p-6 shadow-card sm:p-10"
+            }
+          >
             <HtmlWithScriptsRenderer htmlString={reportHtml} />
           </article>
-          <p className="mt-4 text-center text-[12.5px] text-ink-400">
-            본 보고서는 DART 공시와 웹 자료를 AI가 자동 분석한 결과이며 투자
-            권유가 아닙니다.
-          </p>
+          {!isV2Report && (
+            <p className="mt-4 text-center text-[12.5px] text-ink-400">
+              본 보고서는 DART 공시와 웹 자료를 AI가 자동 분석한 결과이며 투자
+              권유가 아닙니다.
+            </p>
+          )}
           <div ref={chatEndRef} />
         </main>
       </div>
