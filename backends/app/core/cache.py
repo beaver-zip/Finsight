@@ -79,6 +79,15 @@ class SQLiteCache(CacheBackend):
             return None
         return json.loads(value)
 
+    async def peek(self, namespace: str, key: str) -> tuple[Any, bool] | None:
+        """(값, 만료 여부). 만료된 항목도 지우지 않고 돌려준다(원천 장애 때 마지막 값을 쓰려고)."""
+        rows = await asyncio.to_thread(
+            self._run, "SELECT value, expires_at FROM kv WHERE namespace=? AND key=?", (namespace, key))
+        if not rows:
+            return None
+        value, expires_at = rows[0]
+        return json.loads(value), expires_at is not None and expires_at < time.time()
+
     async def set(self, namespace: str, key: str, value: Any, ttl_s: float | None = None) -> None:
         now = time.time()
         await asyncio.to_thread(
