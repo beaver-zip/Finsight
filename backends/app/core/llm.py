@@ -84,14 +84,17 @@ def text_of(msg: Message) -> str:
 async def structured(schema: type[T], messages: list[dict], *, role: Role = "default",
                      effort: Effort = "low", system: list[dict] | str | None = None,
                      max_tokens: int | None = None, task: str = "structured",
-                     validate: Callable[[T], str | None] | None = None) -> T:
+                     validate: Callable[[T], str | None] | None = None, thinking: bool = True) -> T:
     """구조화 출력. 스키마 위반·개수 검사 실패·refusal → 같은 설정으로 1회, max_tokens 중단 →
     max_tokens를 2배로 1회 다시 요청 → 그래도 실패하면 StructuredOutputError."""
     assert messages and messages[-1]["role"] == "user", "메시지는 user 턴으로 끝나야 한다(프리필 금지)"
     model = model_for(role)
     max_tokens = max_tokens or MAX_TOKENS[effort]
     s = get_settings()
-    cache_key = make_key("structured", model, effort, system, messages, schema.model_json_schema())
+    key_parts: list[Any] = ["structured", model, effort, system, messages, schema.model_json_schema()]
+    if not thinking:
+        key_parts.append("no-thinking")
+    cache_key = make_key(*key_parts)
     if s.llm_cache:
         hit = await get_cache().get("llm", cache_key)
         if hit is not None:
@@ -105,8 +108,16 @@ async def structured(schema: type[T], messages: list[dict], *, role: Role = "def
                                       output_format=schema, output_config={"effort": effort})
         if system:
             kwargs["system"] = system
+        if not thinking:
+            # 주어진 사실로 문장을 채우는 작업(본문 작성 등)은 생각 단계 없이도 품질이 같고 3배 빠르다
+            kwargs["thinking"] = {"type": "disabled"}
         async with _sem:
-            resp = await client().messages.parse(**kwargs)
+            if max_tokens > MAX_TOKENS["medium"]:
+                # 긴 출력(본문 작성 등)은 스트리밍으로 받는다. 비스트리밍은 한 번의 읽기 제한(120초)에 걸린다
+                async with client().messages.stream(**kwargs) as st:
+                    resp = await st.get_final_message()
+            else:
+                resp = await client().messages.parse(**kwargs)
         await _account(model, resp.usage, task=task)
 
         if resp.stop_reason == "max_tokens":

@@ -34,8 +34,11 @@ numpy
 pandas
 plotly==6.3.0
 pykrx==1.0.51
-# KRX 지수 API 응답 변경으로 pykrx 지수 조회가 실패할 때의 대체 소스
+# KRX 지수 API 응답 변경으로 pykrx 지수 조회가 실패할 때의 대체 소스, 리포트 v2의 일별 종가·분할 이력
 yfinance
+# 리포트 v2: 문서에 쓰인 글자만 잘라 Pretendard(woff2)를 내장
+fonttools
+brotli
 # pykrx가 pkg_resources를 사용하므로 setuptools 81 미만으로 고정
 setuptools<81
 

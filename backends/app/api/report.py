@@ -1,8 +1,13 @@
-"""/report/{corp_code}: HTML(기존), /stream(SSE), /json(CompanyReport). 완성 리포트는 (corp_code, 최신 rcept_no)로 7일 캐시."""
+"""/report/{corp_code}: HTML, /stream(SSE), /json(CompanyReport).
+
+완성 리포트는 (corp_code, 최신 정기보고서 rcept_no, 그 뒤 최신 잠정실적 rcept_no)로 7일 캐시한다.
+잠정실적이 새로 나오면 키가 바뀌어 다시 만든다.
+"""
 from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import PlainTextResponse, StreamingResponse
@@ -12,32 +17,46 @@ from app.core.cache import get_cache
 from app.core.dart import corp as dart_corp
 from app.core.dart import filings as dart_filings
 from app.core.dart.client import DartError, DartLimit
+from app.core.dart.prelim import prelim_filings
 from app.deps import AppState, get_state
+from app.domain.dates import KST
 from app.domain.models import Citation, CompanyReport
 
 log = logging.getLogger(__name__)
 router = APIRouter()
 WEEK = 7 * 86_400
+VERSION = "v2"
 
 
 def _to_report(out: dict, cost: float | None) -> CompanyReport:
-    snap = out.get("snapshot")
-    cites = [Citation(kind="filing", id=out["filing"].rcept_no, label=out["filing"].report_nm,
-                      url=f"https://dart.fss.or.kr/dsaf001/main.do?rcpNo={out['filing'].rcept_no}")] \
-        if out.get("filing") else []
+    f = out.get("filing")
+    cites = [Citation(kind="filing", id=f.rcept_no, label=f.report_nm,
+                      url=f"https://dart.fss.or.kr/dsaf001/main.do?rcpNo={f.rcept_no}")] if f else []
     cites += [Citation(kind="news", id=n.url, label=n.title, url=n.url) for n in out.get("news", [])]
-    return CompanyReport(corp=out["corp"], filing=out.get("filing"), fs_div=snap.fs_div if snap else None,
-                         period_label=snap.period_label if snap else None, metrics=out.get("metrics", {}),
-                         disclosures=out.get("disclosures", []), news=out.get("news", []),
-                         news_note=out.get("news_note"), regulatory=out.get("regulatory", []),
-                         conclusion=out.get("draft"), verification=out.get("verification"), citations=cites,
-                         errors=out.get("errors", []), cost_usd=cost)
+    data, col = out.get("data"), out.get("collected")
+    fs = col.quarters[-1].fs_div if col is not None and col.quarters else None
+    return CompanyReport(corp=out["corp"], filing=f, latest=data.latest.get("label") if data else None,
+                         fs_div=fs if fs in ("CFS", "OFS") else None, metrics=out.get("metrics", {}),
+                         data=data.to_json() if data else None, draft=out.get("draft"),
+                         verification=out.get("verification"), disclosures=out.get("disclosures", []),
+                         news=out.get("news", []), news_note=out.get("news_note"),
+                         regulatory=out.get("regulatory", []), citations=cites, errors=out.get("errors", []),
+                         cost_usd=cost)
 
 
 async def _cache_key(st: AppState, corp_code: str):
     profile = await dart_corp.get_profile(st.dart, corp_code)
     filing = await dart_filings.latest_periodic(st.dart, profile)
-    return profile, f"{corp_code}:{filing.rcept_no if filing else 'none'}"
+    prelim = "-"
+    if filing is not None:
+        today = datetime.now(KST).date()
+        try:
+            fl = await prelim_filings(st.dart, corp_code, max(filing.rcept_dt, today - timedelta(days=120)), today)
+            if fl:
+                prelim = max(x.rcept_no for x in fl)
+        except Exception as e:  # noqa: BLE001
+            log.info("잠정실적 목록 실패(캐시 키): %s", e)
+    return profile, f"{VERSION}:{corp_code}:{filing.rcept_no if filing else 'none'}:{prelim}"
 
 
 def _config(st: AppState) -> dict:
@@ -57,7 +76,7 @@ async def build_report(st: AppState, corp_code: str) -> dict:
     out = await st.company_graph.ainvoke({"corp": profile, "errors": []}, config=cfg)
     rep = _to_report(out, round(usage.cost_usd, 5))
     value = {"html": out.get("html", ""), "json": rep.model_dump(mode="json")}
-    if out.get("draft") is not None:   # 결론까지 만든 리포트만 캐시한다
+    if out.get("draft") is not None:   # 본문까지 만든 리포트만 캐시한다
         await cache.set("report", key, value, ttl_s=WEEK)
     return value
 
