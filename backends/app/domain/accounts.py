@@ -37,7 +37,33 @@ STANDARD: dict[str, AccountSpec] = {
                                  ("지배기업소유주지분", "지배기업의소유주지분")),
     "cfo": AccountSpec(("CF",), ("ifrs-full_CashFlowsFromUsedInOperatingActivities",),
                        ("영업활동현금흐름", "영업활동으로인한현금흐름")),
+    # 현금흐름의 질·순현금·운전자본·주주환원(리포트 v2)
+    "capex": AccountSpec(("CF",), ("ifrs-full_PurchaseOfPropertyPlantAndEquipment",),
+                         ("유형자산의취득", "유형자산취득", "유형자산의증가")),
+    "intangible_capex": AccountSpec(("CF",), ("ifrs-full_PurchaseOfIntangibleAssets",),
+                                    ("무형자산의취득", "무형자산취득", "무형자산의증가")),
+    "buyback": AccountSpec(("CF",), ("ifrs-full_PaymentsToAcquireOrRedeemEntitysShares",),
+                           ("자기주식의취득", "자기주식취득", "자기주식의매입")),
+    "dividends_paid": AccountSpec(("CF",), ("ifrs-full_DividendsPaidClassifiedAsFinancingActivities",),
+                                  ("배당금의지급", "배당금지급", "현금배당금의지급")),
+    "cash": AccountSpec(("BS",), ("ifrs-full_CashAndCashEquivalents",), ("현금및현금성자산",)),
+    "st_fin": AccountSpec(("BS",), ("ifrs-full_ShorttermDepositsNotClassifiedAsCashEquivalents",),
+                          ("단기금융상품",)),
+    "st_amort": AccountSpec(("BS",), (), ("단기상각후원가금융자산",)),
+    "st_fvpl": AccountSpec(("BS",), (), ("단기당기손익-공정가치금융자산", "단기당기손익인식금융자산")),
+    "st_borrow": AccountSpec(("BS",), ("ifrs-full_ShorttermBorrowings",), ("단기차입금",)),
+    "cur_ltd": AccountSpec(("BS",), ("ifrs-full_CurrentPortionOfLongtermBorrowings",),
+                           ("유동성장기부채", "유동성장기차입금", "유동성사채")),
+    "bonds": AccountSpec(("BS",), ("ifrs-full_BondsIssued", "dart_BondsIssued"), ("사채",)),
+    "lt_borrow": AccountSpec(("BS",), ("ifrs-full_LongtermBorrowings",), ("장기차입금",)),
+    "receivables": AccountSpec(("BS",), ("ifrs-full_CurrentTradeReceivables", "dart_ShortTermTradeReceivable"),
+                               ("매출채권", "매출채권및기타채권", "매출채권및기타유동채권")),
+    "inventory": AccountSpec(("BS",), ("ifrs-full_Inventories",), ("재고자산",)),
 }
+
+# 순현금 계산에 쓰는 계정
+CASH_LIKE = ("cash", "st_fin", "st_amort", "st_fvpl")
+DEBT_LIKE = ("st_borrow", "cur_ltd", "bonds", "lt_borrow")
 
 _LEAD = re.compile(r"^(?:[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+\.|\d+\.|\(\d+\)|[가-하]\.)")
 _NOTE = re.compile(r"\((?:주|주석)\s*[\d,\s]+\)")
