@@ -63,7 +63,7 @@ class LawTools:
         await self.graph.close()
 
     async def search_law(self, query: str, k: int = 8, levels: list[str] | None = None, alpha: float = 0.5,
-                         limit: int = 40) -> list[ArticleHit]:
+                         limit: int = 20) -> list[ArticleHit]:
         """약칭 정규화 → 하이브리드(limit) → 리랭크 → 조문별 최고 청크 점수로 상위 k개 부모 조문."""
         q = normalize(query)
         hits = await self.vectors.hybrid(q, alpha=alpha, limit=limit, levels=levels)
@@ -84,9 +84,10 @@ class LawTools:
     def get_annex(self, key: str) -> Annex | None:
         return self.corpus.annexes.get(key)
 
-    async def expand_citations(self, query: str, keys: list[str], hops: int = 1, lam: float = 0.1) -> list[ArticleHit]:
-        """시드에서 참조·위임 엣지를 hops까지 따라간 후보(최대 50개)를 질문으로 리랭크하고 점수 − λ·hops로 정렬."""
-        cands = await self.graph.expand(keys, hops=hops)
+    async def expand_citations(self, query: str, keys: list[str], hops: int = 1, lam: float = 0.1,
+                               limit: int = 20) -> list[ArticleHit]:
+        """시드에서 참조·위임 엣지를 hops까지 따라간 후보(가까운 순 limit개)를 질문으로 리랭크하고 점수 − λ·hops로 정렬."""
+        cands = await self.graph.expand(keys, hops=hops, limit=limit)
         docs = [(c, self.corpus.get(c.key)) for c in cands]
         docs = [(c, d) for c, d in docs if d is not None]
         scores = await rerank(normalize(query), [doc_text(d) for _, d in docs])

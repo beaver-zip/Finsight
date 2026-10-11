@@ -29,7 +29,8 @@ class LegalConfig:
     hops: int = 2
     lam: float = 0.1                # 확장 조문 감점(홉당)
     alpha: float = 0.5
-    limit: int = 40                 # 하이브리드 후보 수(리랭크 대상)
+    limit: int = 20                 # 하이브리드 후보 수(리랭크 대상). M1에서 40개는 검색 1회 9.6초, 20개는 7.0초
+    expand_limit: int = 20          # 인용 그래프 확장 후보 수(리랭크 대상). 50개 16.1초, 20개 7.6초
     threshold: float = 0.3          # 시드 최고 리랭크 점수가 이보다 낮으면 답하지 않는다(dev로 정할 초깃값)
     max_loops: int = 2
 
@@ -111,7 +112,7 @@ async def expand(state: LegalState, config: RunnableConfig) -> dict:
     seeds = state["seeds"]
     keys = [h.article.key for h in seeds]
     try:
-        ext = await t.expand_citations(state["question"], keys, hops=c.hops, lam=c.lam)
+        ext = await t.expand_citations(state["question"], keys, hops=c.hops, lam=c.lam, limit=c.expand_limit)
     except Exception as e:  # noqa: BLE001
         log.warning("인용 그래프 확장 실패: %s", e)
         return {"context": seeds[:c.context_k], "errors": [f"legal.expand: {type(e).__name__}: {e}"]}

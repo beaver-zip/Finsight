@@ -544,7 +544,7 @@ class Annex(BaseModel):
 | `file_name`, `page` | text, int | 검색 제외 | PDF 뷰어 |
 
 - docker-compose에 `ENABLE_TOKENIZER_KAGOME_KR: "true"`를 넣고 컬렉션을 새로 만들어 재적재한다. 임베딩 입력은 `heading + text`다.
-- `search_law(query, k=8, levels=None, alpha=0.5)`: 약칭 정규화 → `hybrid`(limit 40, `heading^2`·`text`, relativeScoreFusion) → bge-reranker-v2-m3 리랭크(0–1) → 조문별 최고 청크 점수로 상위 k개 부모 조문.
+- `search_law(query, k=8, levels=None, alpha=0.5)`: 약칭 정규화 → `hybrid`(limit 20, `heading^2`·`text`, relativeScoreFusion) → bge-reranker-v2-m3 리랭크(0–1) → 조문별 최고 청크 점수로 상위 k개 부모 조문.
 - α와 limit은 `legal_qa` dev에서 α ∈ {0.25, 0.5, 0.75} × limit ∈ {20, 40, 80} 중 Recall@10이 가장 높은 조합(L1), k(기본 8)와 `context_k`(기본 6)는 L4에서 k ∈ {4, 8} × `context_k` ∈ {4, 6, 8} 중 dev 정답성이 가장 높은 조합으로 정한다.
 
 ### 인용 그래프 (`core/law/graph_store.py`, Neo4j)
@@ -570,11 +570,11 @@ WITH n, p ORDER BY length(p)
 WITH n, collect(p)[0] AS shortest
 RETURN n.key AS key, length(shortest) AS hops, [x IN nodes(shortest) | x.key] AS path
 ORDER BY hops
-LIMIT 50
+LIMIT $limit                            // 기본 20
 ```
 
 - 코퍼스 밖 법령은 `in_corpus=false`인 `Law` 노드로만 만들고, 답변에 넘긴 조문이 이런 노드를 참조하면 답변 끝에 "참조했지만 코퍼스에 없는 법령"으로 적는다. `Article.key`, `Annex.key`, `Law.law_id`에 유일 제약을 건다.
-- 확장 후보(최대 50개)와 시드를 질문과 함께 리랭크하고 `리랭크 점수 − λ·hops`로 정렬해 상위 `context_k`개를 답변에 넘긴다. λ는 초깃값 0.1이고 dev에서 {0, 0.05, 0.1, 0.2} 중 경로 완결률이 가장 높은 값으로 정한다. `path`는 답변에 "법 제21조의2 → 시행령 제11조의4 → 별표 1"로 보여 준다.
+- 확장 후보(가까운 순 최대 20개)와 시드를 질문과 함께 리랭크하고 `리랭크 점수 − λ·hops`로 정렬해 상위 `context_k`개를 답변에 넘긴다. λ는 초깃값 0.1이고 dev에서 {0, 0.05, 0.1, 0.2} 중 경로 완결률이 가장 높은 값으로 정한다. `path`는 답변에 "법 제21조의2 → 시행령 제11조의4 → 별표 1"로 보여 준다.
 - 조문은 1,000개를 넘지 않아 성능만 보면 networkx로 충분하다. Neo4j를 쓰는 이유는 Cypher 가변 길이 경로 질의와 시각적 디버깅이고, 같은 확장을 networkx로도 구현해 P50·P95 지연을 비교한다.
 
 ### 참조 해석기 (`domain/citations.py`)
@@ -889,7 +889,7 @@ class FinalAnswer(BaseModel):  # 설계
 | 기사 본문 수집 | Tavily `raw_content`, 200자 미만이면 trafilatura | 원문은 캐시에 7일만 두고, 리포트에는 요약·근거 한 문장·링크만 남긴다 |
 | 트레이싱 | LangSmith | 환경 변수로 LangGraph를 추적하고 SDK 호출은 `traceable`로 감싼다 |
 | 그래프 저장소 | Neo4j | networkx 구현과 확장 단계 지연(P50·P95)을 비교한다 |
-| 리랭커 | 로컬 `bge-reranker-v2-m3` | `sentence-transformers` CrossEncoder. MPS가 있으면 쓴다. M1(8코어) 측정: 후보 40개 CPU 21초, MPS 8~11초 |
+| 리랭커 | 로컬 `bge-reranker-v2-m3` | `sentence-transformers` CrossEncoder. MPS가 있으면 쓴다. M1(8코어) 측정: 후보 40개 CPU 21초, MPS 8~11초. 그래서 후보를 하이브리드 20개, 확장 20개로 줄였다(2026-10-12 사용자 결정, 검색 1회 9.6→7.0초, 확장 16.1→7.6초) |
 | 체크포인터·Store | SQLite | `AsyncSqliteSaver`, `AsyncSqliteStore` |
 | v1 비교 | 하지 않는다 | v1 재현 구성을 평가에서 뺀다 |
 | 평가 라벨 | Haiku 5.5 초안 + 사람 검수 | 평가셋별 검수 수정 건수를 결과표에 싣는다 |
@@ -915,7 +915,7 @@ class FinalAnswer(BaseModel):  # 설계
 | 뉴스 파이프라인 | 구현 | 중복 임계값·점수 가중치는 초깃값 |
 | 검증 노드 | 구현(리포트) | 채팅 연결은 설계 |
 | 기업×법령 협업 | 트리거·질문 작성만 구현 | 법령 서브그래프가 없어 건너뛴다 |
-| 법령 리서치(적재, 검색, 인용 그래프, 참조 해석기, 서브그래프) | 구현 | 리포트 규제 노드에 연결. 채팅 연결, 참조 해석기 정확도 측정(100개 표본), dev 튜닝은 아직 없다. 질문 1건 약 95초(리랭크 약 55초) |
+| 법령 리서치(적재, 검색, 인용 그래프, 참조 해석기, 서브그래프) | 구현 | 리포트 규제 노드에 연결. 채팅 연결, 참조 해석기 정확도 측정(100개 표본), dev 튜닝은 아직 없다. 질문 1건 약 50초(모델을 올린 뒤, 리랭크 약 25초) |
 | 오케스트레이터, 뉴스·웹 에이전트, 메모리, `POST /chat` | 설계 |  |
 | v1 경로 호환, 문서 업로드, 관리 API | 설계 | v2 앱에 없어서 프론트의 채팅·법령 검색·업로드 화면이 동작하지 않는다 |
 | 평가셋, 러너, CI, gitleaks | 설계 | 단위 테스트 53개만 있다 |
