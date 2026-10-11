@@ -66,6 +66,7 @@ class Ref:
     raw: str = ""
     from_para: int | None = None
     annex: bool = False
+    span: tuple[int, int] = (-1, -1)   # 본문 안 위치(범위로 풀린 사이 조문은 끝 참조의 위치)
 
     @property
     def in_corpus(self) -> bool:
@@ -117,7 +118,8 @@ def find_refs(doc: str, text: str, *, article: str | None = None, from_para: int
             if prev is None or prev.no is None:
                 continue                       # 같은 조 = 지금 조문(엣지 아님)
             law = prev.law
-            r = Ref(law, prev.no, prev.branch, _int(m["para"]) or None, _int(m["item"]), m.group(0).strip(), from_para)
+            r = Ref(law, prev.no, prev.branch, _int(m["para"]) or None, _int(m["item"]), m.group(0).strip(), from_para,
+                    span=m.span())
             out.append(r)
             prev, prev_end = r, m.end()
             continue
@@ -130,20 +132,20 @@ def find_refs(doc: str, text: str, *, article: str | None = None, from_para: int
         if law is None:
             continue
         no, branch = int(m["no"]), _int(m["branch"]) or 0
-        r = Ref(law, no, branch, _int(m["para"]), _int(m["item"]), m.group(0).strip(), from_para)
+        r = Ref(law, no, branch, _int(m["para"]), _int(m["item"]), m.group(0).strip(), from_para, span=m.span())
         # 범위: 앞 참조부터 이 참조까지 사이 조문
         gap = text[prev_end:m.start()]
         if prev is not None and prev.law == law and prev.no is not None and \
                 ((_FROM.match(gap) and _UNTIL.match(text[m.end():])) or _THRU.match(gap)):
             for k in range(prev.no + 1, no):
-                out.append(Ref(law, k, 0, None, None, f"{prev.raw}~{r.raw}", from_para))
+                out.append(Ref(law, k, 0, None, None, f"{prev.raw}~{r.raw}", from_para, span=m.span()))
         out.append(r)
         prev, prev_end = r, m.end()
     for m in laws_only:
-        out.append(Ref(law_key(m["law"]), None, raw=m.group(0), from_para=from_para))
+        out.append(Ref(law_key(m["law"]), None, raw=m.group(0), from_para=from_para, span=m.span()))
     for m in ANNEX.finditer(text):
         law = ABBR.get(doc, {}).get(m["abbr"], doc) if m["abbr"] else doc
-        out.append(Ref(law, int(m["no"]), _int(m["branch"]) or 0, raw=m.group(0).strip(), from_para=from_para,
+        out.append(Ref(law, int(m["no"]), _int(m["branch"]) or 0, raw=m.group(0).strip(), from_para=from_para, span=m.span(),
                        annex=True))
     return [r for r in out if not (article and r.key == article)]
 
