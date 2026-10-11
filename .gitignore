@@ -11,6 +11,7 @@ node_modules/
 .venv/
 .venv-local/
 weaviate_data/
+neo4j_data/
 dist/
 *.tsbuildinfo
 .idea/
