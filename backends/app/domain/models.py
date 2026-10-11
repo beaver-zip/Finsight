@@ -276,7 +276,8 @@ class LegalAnswer(BaseModel):
     answerable: bool
     points: list[LegalPoint] = Field(default_factory=list)
     paths: list[list[str]] = Field(default_factory=list)
-    fallback: list[str] = Field(default_factory=list)   # 거절 시 상위 조문 제목
+    fallback: list[str] = Field(default_factory=list)   # 거절 시 상위 조문 key
+    notes: list[str] = Field(default_factory=list)      # 시행일 기준, 코퍼스 밖 참조 법령 등 답변 끝에 붙일 말
 
 
 class LegalFinding(BaseModel):

@@ -11,7 +11,8 @@ from app.core.cache import get_cache, make_key
 from app.settings import get_settings, require
 
 BATCH = 64
-_sem = asyncio.Semaphore(4)
+_sem = asyncio.Semaphore(2)
+RETRY_DELAYS = (2, 5, 10, 20, 0)
 
 
 async def embed(texts: list[str], *, http: httpx.AsyncClient | None = None) -> np.ndarray:
@@ -42,10 +43,14 @@ async def embed(texts: list[str], *, http: httpx.AsyncClient | None = None) -> n
 async def _call(http: httpx.AsyncClient, batch: list[str]) -> list[list[float]]:
     s = get_settings()
     await budget.check_budget()
-    async with _sem:
-        r = await http.post(f"{s.openrouter_base_url}/embeddings",
-                            headers={"Authorization": f"Bearer {require(s.openrouter_key, 'OPENROUTER_KEY')}"},
-                            json={"model": s.embedding_model, "input": batch})
+    for delay in RETRY_DELAYS:                # 429·5xx는 기다렸다가 다시 부른다
+        async with _sem:
+            r = await http.post(f"{s.openrouter_base_url}/embeddings",
+                                headers={"Authorization": f"Bearer {require(s.openrouter_key, 'OPENROUTER_KEY')}"},
+                                json={"model": s.embedding_model, "input": batch})
+        if r.status_code != 429 and r.status_code < 500:
+            break
+        await asyncio.sleep(delay)
     r.raise_for_status()
     data = r.json()
     if "data" not in data:

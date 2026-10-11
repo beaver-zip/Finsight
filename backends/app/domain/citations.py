@@ -156,3 +156,51 @@ def delegates(upper_law: str, lower_law: str, upper_text: str) -> bool:
     """상위 조문 본문에 하위 법령으로 위임하는 문구가 있는가."""
     pat = DELEGATION.get(lower_law)
     return bool(pat and pat.search(upper_text))
+
+
+# ---------------- 그래프 엣지
+LEVEL_RANK = {ACT: 0, DECREE: 1, REG: 2, RULE: 3}
+IMPLEMENTS = [(DECREE, ACT), (REG, DECREE), (RULE, REG)]
+
+
+@dataclass(frozen=True)
+class Edge:
+    src: str                     # 조문 key
+    dst: str                     # 조문·별표 key 또는 법령 key(코퍼스 밖)
+    kind: str                    # "REFERS_TO" | "DELEGATES_TO"
+    raw: str = ""
+    from_para: int | None = None
+    to_para: int | None = None
+    to_item: int | None = None
+    phrase: str = ""
+
+
+def build_edges(articles: list, known: set[str]) -> tuple[list[Edge], set[str]]:
+    """articles: (법령 key, Article) 목록. known: 코퍼스의 조문·별표 key.
+    돌려주는 것: 엣지 목록, 참조됐지만 코퍼스 밖인 법령 key 집합.
+
+    - REFERS_TO: 조문 → 참조한 조문·별표(같은 (출발, 도착, 출발 항)은 하나로), 코퍼스 밖 법령은 법령 노드로.
+    - DELEGATES_TO: 하위 문서 조문 B가 상위 문서 조문 A를 참조하고, A 본문에 하위 문서로 위임하는 문구가 있으면 A → B.
+    """
+    texts = {a.key: "\n".join(p.text for p in a.paragraphs) for _, a in articles}
+    edges: dict[tuple, Edge] = {}
+    outside: set[str] = set()
+    for law, a in articles:
+        for p in a.paragraphs:
+            for r in find_refs(law, p.text, article=a.key, from_para=p.no):
+                if not r.in_corpus:
+                    outside.add(r.law)
+                    edges.setdefault((a.key, r.law, "REFERS_TO", None),
+                                     Edge(a.key, r.law, "REFERS_TO", r.raw))
+                    continue
+                if r.no is None or r.key not in known:
+                    continue
+                edges.setdefault((a.key, r.key, "REFERS_TO", p.no),
+                                 Edge(a.key, r.key, "REFERS_TO", r.raw, p.no, r.para, r.item))
+                if not r.annex and LEVEL_RANK.get(r.law, 9) < LEVEL_RANK.get(law, 9):
+                    m = DELEGATION.get(law)
+                    hit = m.search(texts.get(r.key, "")) if m else None
+                    if hit:
+                        edges.setdefault((r.key, a.key, "DELEGATES_TO", None),
+                                         Edge(r.key, a.key, "DELEGATES_TO", r.raw, phrase=hit.group(0)))
+    return list(edges.values()), outside
