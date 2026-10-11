@@ -16,6 +16,7 @@ class AppState:
     dart: DartClient
     company_graph: Any
     legal_runner: Any = None
+    law_tools: Any = None
 
 
 def get_state(request: Request) -> AppState:
