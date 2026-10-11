@@ -9,6 +9,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.agents.company.graph import build_company_graph
+from app.agents.legal.graph import build_legal_graph, make_runner
+from app.agents.legal.tools import LawTools
 from app.api import financial, report
 from app.core.cache import get_cache
 from app.core.dart.client import DartClient
@@ -29,11 +31,27 @@ async def lifespan(app: FastAPI):
     await cache.purge_expired()
     http = httpx.AsyncClient(timeout=10, follow_redirects=True)
     await tavily.init_free_credits(http)
-    app.state.fs = AppState(http=http, dart=DartClient(http), company_graph=build_company_graph())
+    law_tools = await _open_law_tools()
+    runner = make_runner(build_legal_graph(), law_tools) if law_tools else None
+    app.state.fs = AppState(http=http, dart=DartClient(http), company_graph=build_company_graph(),
+                            legal_runner=runner, law_tools=law_tools)
     try:
         yield
     finally:
+        if law_tools:
+            await law_tools.close()
         await http.aclose()
+
+
+async def _open_law_tools():
+    """Weaviate·Neo4j가 꺼져 있으면 법령 리서치 없이 뜬다(리포트 규제 절은 건너뛴다)."""
+    try:
+        t = await LawTools.open()
+        await t.graph.expand(["전자금융거래법:1"], hops=1, limit=1)
+        return t
+    except Exception as e:  # noqa: BLE001
+        logging.getLogger(__name__).warning("법령 리서치 비활성(Weaviate·Neo4j 연결 실패): %s", type(e).__name__)
+        return None
 
 
 app = FastAPI(title="Finsight v2 API", version="2.0.0", lifespan=lifespan)
