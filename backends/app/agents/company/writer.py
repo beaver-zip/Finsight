@@ -148,6 +148,7 @@ WRITER_SYSTEM = """너는 한국 증권사 리서치센터의 기업 분석 애�
 - market_a(1): 최근 주가 반응(발표일 등락, 지수 대비, 수급·시장 요인은 기사로). 뒤에 '1년 주가' 차트.
 - market_b(1): 잠정실적 발표일 반응 이력. 뒤에 '발표 반응' 차트.
 - market_c(0~1): 증권가·업계 시각과 변수(기사 인용).
+- 자료의 "금융업"이 true면(은행·금융지주·보험) 현금흐름 절이 "주주환원" 절로 바뀐다: cash_head는 "주주환원: " 뒤에 붙고, cash_a는 빈 리스트, cash_b에 배당·자기주식만 쓴다. summary 4)도 주주환원으로 쓴다.
 - 해당 차트·자료가 없는 그룹은 다른 사실로 채우고, 쓸 근거가 없으면 빈 리스트로 둔다(summary 제외).
 - 블록 id는 "그룹.순번"(예: "earnings_a.1"). 블록 본문은 2~4문장, 본문 전체는 2,000~3,000자."""
 
@@ -178,7 +179,8 @@ def evidence_prompt(data: ReportData, news: list[NewsItem], legal: list[dict] | 
             for n in news]
     disc = [{"date": d["date"], "title": d["title"], "gist": d.get("gist")} for d in data.disclosures]
     return json.dumps({"기업": data.corp["name"], "작성일": data.made, "최근 실적 기준": data.latest.get("label"),
-                       "잠정실적": data.latest.get("prelim"), "사실표": facts, "차트": charts, "표": tables,
+                       "잠정실적": data.latest.get("prelim"),
+                       "금융업": data.corp.get("industry") == "financial", "사실표": facts, "차트": charts, "표": tables,
                        "기사": arts, "최근 공시": disc, "법령 검토": legal or []}, ensure_ascii=False, indent=0)
 
 
