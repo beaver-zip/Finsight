@@ -17,6 +17,7 @@ from app.core.dart.client import DartClient
 from app.core.dart.history import RC, cum_value, value
 from app.core.dart.shares import share_counts
 from app.core.market import daily_close, pref_candidates, ticker_for
+from app.domain.metrics import industry_group
 from app.domain.models import CorpProfile
 from app.settings import BACKEND_DIR
 
@@ -63,6 +64,7 @@ class PeerRow:
     induty_code: str | None = None
     ni_q: float | None = None           # 최근 분기(3개월) 지배주주 순이익. 사업보고서 기준이면 None
     per_rr: float | None = None         # 최근 분기 순이익 × 4 기준 PER
+    group: str = "general"              # 금융 세트 판정(industry_group). 대상 회사와 다르면 피어에서 뺀다
 
 
 def _f(v: Decimal | None) -> float | None:
@@ -114,7 +116,8 @@ async def metrics_for(dart: DartClient, corp_code: str, stock_code: str, corp_cl
     mcap = None
     if price and sh:
         mcap = price * sh.common_out + (pref_px * sh.pref_out if pref_px else 0)
-    row = PeerRow(corp_code, stock_code, name, is_self, mcap, ni_ttm, eq, eq_avg, price, total, induty_code=induty_code)
+    row = PeerRow(corp_code, stock_code, name, is_self, mcap, ni_ttm, eq, eq_avg, price, total, induty_code=induty_code,
+                  group=industry_group(cur, induty_code))
     if q < 4:
         row.ni_q = _f(value(cur, "net_income_owners", "thstrm_amount")) or _f(value(cur, "net_income", "thstrm_amount"))
     if ni_ttm is not None and eq_avg:
@@ -129,10 +132,22 @@ async def metrics_for(dart: DartClient, corp_code: str, stock_code: str, corp_cl
 
 
 async def peer_rows(dart: DartClient, corp: CorpProfile, year: int, q: int, n: int = 6) -> list[PeerRow]:
-    cands = peer_candidates(corp, n)
-    jobs = [metrics_for(dart, corp.corp_code, corp.stock_code or "", corp.corp_cls, corp.corp_name, year, q, is_self=True,
-                        induty_code=corp.induty_code)]
-    jobs += [metrics_for(dart, c["corp_code"], c["stock_code"], c["corp_cls"], c["name"], year, q,
-                         induty_code=c.get("induty_code")) for c in cands]
-    rows = [r for r in await asyncio.gather(*jobs) if r is not None]
+    """같은 중분류에서 시가총액 순으로 n개. 지주회사(64992)처럼 한 코드에 금융지주와 일반 지주가 섞이므로
+    대상 회사와 금융 세트 판정이 다른 후보는 빼고 다음 후보로 채운다(후보는 최대 3n개까지 본다)."""
+    me = await metrics_for(dart, corp.corp_code, corp.stock_code or "", corp.corp_cls, corp.corp_name, year, q,
+                           is_self=True, induty_code=corp.induty_code)
+    group = me.group if me else "general"
+    cands = peer_candidates(corp, n * 3)
+    rows = [me] if me else []
+    picked = 0
+    for i in range(0, len(cands), n):
+        if picked >= n:
+            break
+        batch = cands[i:i + n]
+        got = await asyncio.gather(*(metrics_for(dart, c["corp_code"], c["stock_code"], c["corp_cls"], c["name"], year, q,
+                                                 induty_code=c.get("induty_code")) for c in batch))
+        for r in got:
+            if r is not None and r.group == group and picked < n:
+                rows.append(r)
+                picked += 1
     return sorted(rows, key=lambda r: -(r.mcap or 0))

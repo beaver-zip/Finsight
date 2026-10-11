@@ -106,6 +106,38 @@ def test_analyze_core_facts_and_charts():
     assert f["shares_cut_common.since"] == "2.0% 감소"
 
 
+def test_ofs_company_uses_net_income_and_drops_owner_wording():
+    inp = _inputs()
+    for r in inp.quarters:
+        r.fs_div = "OFS"
+    data = analyze(inp)
+    f = {k: m for k, m in data.facts.items()}
+    assert f["roe.ttm"].value > 0 and f["per.ttm"].text != "–"
+    assert all("지배" not in m.label for m in f.values())
+    assert "지배" not in render_report(data, None, fs_div="OFS")
+
+
+def test_financial_company_has_shareholder_section_only():
+    inp = _inputs()
+    inp.industry = "financial"
+    for k in inp.cum:
+        inp.cum[k]["cfo"] = -inp.cum[k]["cfo"]           # 은행은 영업현금흐름이 음수일 때가 많다
+    data = analyze(inp)
+    assert "cash" not in data.charts and "cash" not in data.tables
+    assert not any(k.split(".")[0] in {"fcf", "cfo", "cfo_ni", "net_cash", "capex"} for k in data.facts)
+    assert "div_paid.H126" in data.facts and data.facts["bb_purpose.now"].text == "주식소각"
+    d = _draft(cash_head=Headline(text="주주환원: 배당이 늘었다"),
+               cash_b=[Block(id="cash_b.1", head="배당", text="배당금 지급액은 {{div_paid.H126}}.")])
+    html = render_report(data, d)
+    assert "<h2>주주환원: 배당이 늘었다</h2>" in html and "현금흐름과 주주환원" not in html
+
+
+def test_cfo_to_net_income_blank_when_cfo_negative():
+    inp = _inputs()
+    inp.cum[(2026, 2)]["cfo"] = D(-1e11)
+    assert "cfo_ni.H126" not in analyze(inp).facts
+
+
 def test_segments_standalone_from_cumulative():
     data = analyze(_inputs())
     f = {k: m for k, m in data.facts.items()}

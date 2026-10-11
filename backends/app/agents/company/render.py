@@ -694,10 +694,13 @@ def render_report(data, draft: ReportDraft | None, *, fs_div: str | None = "CFS"
     made = date.fromisoformat(data.made)
     grp = (lambda g: getattr(draft, g)) if draft else (lambda g: [])
 
+    names = {**SECTION_NAMES, "cash": "주주환원"} if corp.get("industry") == "financial" else SECTION_NAMES
+
     def head(field: str, sec: str) -> str:
         h: Headline | None = getattr(draft, field, None) if draft else None
-        text = re.sub(rf"^\s*{re.escape(SECTION_NAMES[sec])}\s*:\s*", "", h.text) if h and h.text else ""
-        return f"<h2>{esc(SECTION_NAMES[sec])}" + (f": {tx(text)}" if text else "") + "</h2>"
+        text = re.sub(rf"^\s*({re.escape(names[sec])}|{re.escape(SECTION_NAMES[sec])})\s*:\s*", "", h.text) \
+            if h and h.text else ""
+        return f"<h2>{esc(names[sec])}" + (f": {tx(text)}" if text else "") + "</h2>"
 
     def chart(kind: str, cls: str = "") -> str:
         sp = data.charts.get(kind)
@@ -712,7 +715,7 @@ def render_report(data, draft: ReportDraft | None, *, fs_div: str | None = "CFS"
     lead = ""
     if hero:
         if hero.get("kind") == "ni":
-            lead = figure(ch_bars, {**hero, "what": "지배주주 순이익"}, u, None, "lead")
+            lead = figure(ch_bars, {**hero, "what": "지배주주 순이익" if fs_div != "OFS" else "순이익"}, u, None, "lead")
         else:
             lead = figure(ch_opm, hero, u, None, "lead")
     points = blocks_html(grp("summary"), tx, "pt")

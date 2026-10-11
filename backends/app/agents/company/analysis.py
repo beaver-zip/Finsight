@@ -157,7 +157,9 @@ def analyze(inp: Inputs) -> ReportData:
         pr = QRow(key=pre.key + "P", year=pre.year, q=pre.q, preliminary=True, rcept_no=pre.rcept_no,
                   revenue=pre.rows["revenue"].cur if "revenue" in pre.rows else None,
                   operating_income=pre.rows["operating_income"].cur if "operating_income" in pre.rows else None,
-                  net_income_owners=pre.rows["net_income_owners"].cur if "net_income_owners" in pre.rows else None)
+                  net_income_owners=(pre.rows["net_income_owners"].cur if "net_income_owners" in pre.rows
+                                     else pre.rows["net_income"].cur
+                                     if "net_income" in pre.rows and last_periodic.fs_div == "OFS" else None))
         rows.append(pr)
     else:
         pre = None
@@ -166,7 +168,7 @@ def analyze(inp: Inputs) -> ReportData:
     ttm_rev = sum(f(r.revenue) or 0 for r in qs[-4:]) if len(qs) >= 4 else None
     big = (ttm_rev or 0) >= 10e12
     data = ReportData(corp={"name": name, "corp_code": corp.corp_code, "stock_code": corp.stock_code,
-                            "corp_cls": corp.corp_cls, "induty_code": corp.induty_code},
+                            "corp_cls": corp.corp_cls, "induty_code": corp.induty_code, "industry": inp.industry},
                       made=inp.today.isoformat(), asof=inp.px[-1][0].isoformat() if inp.px else None,
                       latest={"key": L.key if L else None, "prelim": pre is not None,
                               "label": (f"{pre.key} 잠정" if pre else (L.key if L else ""))},
@@ -182,8 +184,31 @@ def analyze(inp: Inputs) -> ReportData:
         except Exception as e:  # noqa: BLE001
             log.exception("분석 %s 실패", nm)
             data.notes.append(f"{nm}: {type(e).__name__}: {e}")
+    if L is not None and next((r.fs_div for r in reversed(qs) if r.fs_div), None) == "OFS":
+        _ofs_words(data, F)
     data.facts = F.items
     return data
+
+
+_OFS = (("지배주주 순이익", "순이익"), ("지배순이익", "순이익"), ("평균 지배주주 자본", "평균 자본"),
+        ("지배주주 자본", "자본"), ("연결·지배주주", "별도"))
+
+
+def _ofs_words(data: ReportData, F: Facts) -> None:
+    """별도 재무제표 회사: 순이익·자본이 지배주주 귀속이 아니므로 라벨에서 '지배'를 뺀다."""
+    def fix(x):
+        if isinstance(x, str):
+            for a, b in _OFS:
+                x = x.replace(a, b)
+            return x
+        if isinstance(x, list):
+            return [fix(v) for v in x]
+        if isinstance(x, dict):
+            return {k: fix(v) for k, v in x.items()}
+        return x
+    data.charts, data.tables, data.key_data = fix(data.charts), fix(data.tables), fix(data.key_data)
+    for m in F.items.values():
+        m.label, m.formula = fix(m.label), fix(m.formula)
 
 
 # ---------------- 핵심 수치
@@ -808,7 +833,7 @@ def _cash(c: dict) -> None:
         debt = sum(g(n) or 0 for n in DEBT_LIKE)
         fcf = cfo - abs(capex or 0) - abs(intan or 0) if cfo is not None else None
         sr = abs(g("buyback") or 0) + abs(g("dividends_paid") or 0)
-        return {"cfo": cfo, "ni": ni, "cfo_ni": cfo / ni if cfo is not None and ni and ni > 0 else None,
+        return {"cfo": cfo, "ni": ni, "cfo_ni": cfo / ni if cfo is not None and cfo > 0 and ni and ni > 0 else None,
                 "ar": g("receivables"), "inv": g("inventory"), "capex": abs(capex) if capex is not None else None,
                 "intan": abs(intan) if intan is not None else None,
                 "capex_rev": abs(capex) / g("revenue") * 100 if capex is not None and g("revenue") else None,
@@ -819,6 +844,12 @@ def _cash(c: dict) -> None:
     V = vals[cur]
     cl = plab(cur)
     lc = lab(cur)
+    F.add("sr", cl, f"자기주식 취득+배당 지급({lc})", fmt.money(V["sr"]), V["sr"], "KRW")
+    F.add("buyback", cl, f"자기주식 취득 지급액({lc})", fmt.money(V["buyback"]), V["buyback"], "KRW")
+    F.add("div_paid", cl, f"배당금 지급액({lc})", fmt.money(V["div"]), V["div"], "KRW")
+    _shareholder(c, cur, fy_last)
+    if inp.industry == "financial":      # 금융업은 영업현금흐름·설비투자·순현금이 뜻이 없어 주주환원만 둔다
+        return
     F.add("fcf", cl, f"잉여현금흐름({lc})", fmt.money(V["fcf"]), V["fcf"], "KRW", formula="영업활동현금흐름 − 유형·무형자산 취득")
     F.add("cfo", cl, f"영업활동현금흐름({lc})", fmt.money(V["cfo"]), V["cfo"], "KRW")
     F.add("capex", cl, f"유형자산 취득({lc})", fmt.money(V["capex"]), V["capex"], "KRW")
@@ -826,9 +857,6 @@ def _cash(c: dict) -> None:
     F.add("net_cash", cl, f"순현금({lc} 말)", fmt.money(V["net_cash"]), V["net_cash"], "KRW", formula="현금성자산·단기금융상품 등 − 차입금·사채")
     F.add("cfo_ni", cl, f"영업현금흐름/순이익({lc})", fmt.times(V["cfo_ni"], 2), V["cfo_ni"], "x")
     F.add("capex_rev", cl, f"매출 대비 유형자산 취득({lc})", fmt.pct(V["capex_rev"]), V["capex_rev"], "%")
-    F.add("sr", cl, f"자기주식 취득+배당 지급({lc})", fmt.money(V["sr"]), V["sr"], "KRW")
-    F.add("buyback", cl, f"자기주식 취득 지급액({lc})", fmt.money(V["buyback"]), V["buyback"], "KRW")
-    F.add("div_paid", cl, f"배당금 지급액({lc})", fmt.money(V["div"]), V["div"], "KRW")
     if V["fcf"] and V["fcf"] > 0 and V["sr"]:
         F.add("sr_share", cl, "주주환원 ÷ 잉여현금흐름", f"{V['sr'] / V['fcf'] * 100:.0f}%", V["sr"] / V["fcf"] * 100, "%")
     fy = (fy_last, 4)
@@ -867,30 +895,6 @@ def _cash(c: dict) -> None:
         if q4 and q4.revenue:
             days = vals[fy]["ar"] / f(q4.revenue) * 92
             F.add("ar_days", q4.key, f"매출채권 회수 기간({q4.key}말)", f"{days:.0f}일", days, "n")
-    # 발행주식수 감소(소각)
-    base_y = fy_last - 1
-    b, n_ = inp.shares.get((base_y, 4)), inp.shares.get(cur) or inp.shares.get((y, q))
-    if b and n_:
-        cc = (n_.common_issued / b.common_issued - 1) * 100
-        if cc < -0.1:
-            F.add("shares_cut_common", "since", f"{base_y}년 말 이후 보통주 발행주식수 변화", f"{abs(cc):.1f}% 감소", cc, "%")
-        if b.pref_issued and n_.pref_issued:
-            cp = (n_.pref_issued / b.pref_issued - 1) * 100
-            if cp < -0.1:
-                F.add("shares_cut_pref", "since", f"{base_y}년 말 이후 우선주 발행주식수 변화", f"{abs(cp):.1f}% 감소", cp, "%")
-        F.add("shares_base_year", "since", "발행주식수 비교 기준 연도", f"{base_y}년 말")
-    # 진행 중인 자기주식 취득 결정
-    active = [bd for bd in inp.buybacks if bd.end and bd.end >= (inp.today - timedelta(days=30)).isoformat()]
-    if active:
-        bd = active[-1]
-        F.add("bb_amount", "now", "자기주식 취득 결정 금액(보통주)", fmt.money(bd.amount_common), bd.amount_common, "KRW",
-              source=f"주요사항보고서 rcpNo {bd.rcept_no}")
-        F.add("bb_shares", "now", "자기주식 취득 예정 주식수(보통주)", f"{bd.shares_common:,}주", bd.shares_common, "n")
-        F.add("bb_period", "now", "자기주식 취득 기간", f"{fmt.md(bd.start)}~{fmt.md(bd.end)}" if bd.start and bd.end else None)
-        F.add("bb_end", "now", "자기주식 취득 종료일", fmt.md(bd.end) if bd.end else None)
-        F.add("bb_decided", "now", "자기주식 취득 결정일", fmt.md(bd.decided) if bd.decided else None)
-        F.add("bb_purpose", "now", "자기주식 취득 목적", bd.purpose)
-        c["buyback"] = bd
     div = data.table_div
     R = lambda key, fn=lambda v: fmt.tbl(v, div): [fn(vals[k][key]) for k in cols]
     data.tables["cash"] = {"title": "현금흐름과 운전자본", "unit": f"{data.table_unit}, 배, %", "heads": [lab(k) for k in cols],
@@ -916,6 +920,36 @@ def _cash(c: dict) -> None:
         title = "잉여현금흐름과 순현금"
     data.charts["cash"] = {"cols": [[lab(k), vals[k]["fcf"], vals[k]["net_cash"]] for k in fy_cols],
                            "title": title, "subtitle": f"잉여현금흐름과 기말 순현금, {_unit_word(data)}", "source": c["name"]}
+
+
+def _shareholder(c: dict, cur: tuple[int, int], fy_last: int) -> None:
+    """발행주식수 감소와 진행 중인 자기주식 취득. 금융업에서도 쓴다."""
+    inp, F = c["inp"], c["F"]
+    y, q = inp.filing.bsns_year, _q_of(inp.filing.reprt_code)
+    # 발행주식수 감소(소각)
+    base_y = fy_last - 1
+    b, n_ = inp.shares.get((base_y, 4)), inp.shares.get(cur) or inp.shares.get((y, q))
+    if b and n_:
+        cc = (n_.common_issued / b.common_issued - 1) * 100
+        if cc < -0.1:
+            F.add("shares_cut_common", "since", f"{base_y}년 말 이후 보통주 발행주식수 변화", f"{abs(cc):.1f}% 감소", cc, "%")
+        if b.pref_issued and n_.pref_issued:
+            cp = (n_.pref_issued / b.pref_issued - 1) * 100
+            if cp < -0.1:
+                F.add("shares_cut_pref", "since", f"{base_y}년 말 이후 우선주 발행주식수 변화", f"{abs(cp):.1f}% 감소", cp, "%")
+        F.add("shares_base_year", "since", "발행주식수 비교 기준 연도", f"{base_y}년 말")
+    # 진행 중인 자기주식 취득 결정
+    active = [bd for bd in inp.buybacks if bd.end and bd.end >= (inp.today - timedelta(days=30)).isoformat()]
+    if active:
+        bd = active[-1]
+        F.add("bb_amount", "now", "자기주식 취득 결정 금액(보통주)", fmt.money(bd.amount_common), bd.amount_common, "KRW",
+              source=f"주요사항보고서 rcpNo {bd.rcept_no}")
+        F.add("bb_shares", "now", "자기주식 취득 예정 주식수(보통주)", f"{bd.shares_common:,}주", bd.shares_common, "n")
+        F.add("bb_period", "now", "자기주식 취득 기간", f"{fmt.md(bd.start)}~{fmt.md(bd.end)}" if bd.start and bd.end else None)
+        F.add("bb_end", "now", "자기주식 취득 종료일", fmt.md(bd.end) if bd.end else None)
+        F.add("bb_decided", "now", "자기주식 취득 결정일", fmt.md(bd.decided) if bd.decided else None)
+        F.add("bb_purpose", "now", "자기주식 취득 목적", bd.purpose)
+        c["buyback"] = bd
 
 
 # ---------------- 잠정실적 발표 반응

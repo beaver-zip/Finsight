@@ -115,6 +115,8 @@ async def quarterly_history(dart: DartClient, corp_code: str, last: tuple[int, i
                     fy, s3 = value(s, it, "thstrm_amount"), cum_value(snaps.get((y, 3)), it)
                     v = None if fy is None or s3 is None else fy - s3
                 setattr(r, it, v)
+            if s.fs_div == "OFS" and r.net_income_owners is None:   # 별도 재무제표에는 지배주주 귀속 구분이 없다
+                r.net_income_owners = r.net_income
             r.equity_owners = value(s, "equity_owners") or value(s, "total_equity")
         rows.append(r)
     # 앞쪽의 빈 분기(상장 전 등)는 잘라 낸다
