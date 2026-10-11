@@ -32,7 +32,7 @@ cd finsight
 ```bash
 mv ~/Downloads/finsight.env backends/.env            # 키와 로컬 설정 (필수)
 mkdir -p backends/data/cache
-mv ~/Downloads/cache.sqlite backends/data/cache/     # 비용 장부와 수집 캐시 (선택)
+unzip ~/Downloads/cache.sqlite.zip -d backends/data/cache/   # 비용 장부와 수집 캐시 (선택)
 ```
 
 `cache.sqlite`를 넣으면 지금까지의 비용 장부(누적 0.16달러)가 이어져 10달러 예산 차단이 정확해지고, 삼성전자 등 이미 수집한 DART·뉴스 응답을 다시 받지 않는다.
