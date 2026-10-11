@@ -25,7 +25,7 @@
 
 ## 비용
 
-- 유료 API(Claude·OpenRouter·Tavily) 합계 10달러 이내, `BUDGET_USD=9`에서 자동 차단. 2026-10-12 누적 0.16달러. 장부는 `backends/data/cache/cache.sqlite`의 `ledger` 표, 합계는 `GET /health/budget`.
+- 유료 API(Claude·OpenRouter·Tavily) 합계 10달러 이내, `BUDGET_USD=9`에서 자동 차단. 2026-10-12 누적 약 0.18달러. 장부는 `backends/data/cache/cache.sqlite`의 `ledger` 표, 합계는 `GET /health/budget`.
 - 리포트 1건: 뉴스 캐시가 있으면 약 0.012달러(주장 지지 검증이 절반), 뉴스까지 새로 받으면 약 0.02달러 + Tavily 3~5크레딧(무료 플랜 월 1,000).
 - 생성 모델은 Haiku 5.5(`claude-haiku-5-5`). Sonnet 5.5는 법령 30문항의 생성 모델 비교에만 쓴다.
 
@@ -45,10 +45,10 @@ cd frontends/corp-advisor--app && npm install && npm run dev   # 프론트 http:
 
 ## 현재 상태
 
-- 구현: 공통 기반(설정·캐시·비용 장부·Claude 호출·임베딩), OpenDART 수집, 시세·동종 업종, 뉴스 파이프라인, 검증 노드, 리포트 v2(`/report/{corp_code}`, `/json`, `/stream`)와 프론트 리포트 화면. 테스트 53개.
-- 없음: 법령 리서치, 오케스트레이터·`POST /chat`, 메모리, 업로드·관리 API, 평가 러너. `main.py`에는 `/report`·`/financial`만 연결돼 있어서 프론트의 채팅·법령 검색·업로드 화면은 지금 동작하지 않는다.
+- 구현: 공통 기반(설정·캐시·비용 장부·Claude 호출·임베딩), OpenDART 수집, 시세·동종 업종, 뉴스 파이프라인, 검증 노드, 리포트 v2(`/report/{corp_code}`, `/json`, `/stream`)와 프론트 리포트 화면, 법령 리서치(적재 `scripts/ingest_law.py`, 검색·리랭크, Neo4j 인용 그래프, 서브그래프 `agents/legal/`, 리포트 규제 노드에 연결). 테스트 77개.
+- 없음: 오케스트레이터·`POST /chat`, 메모리, 업로드·관리 API, 평가 러너. `main.py`에는 `/report`·`/financial`만 연결돼 있어서 프론트의 채팅·법령 검색·업로드 화면은 지금 동작하지 않는다.
 - v1 잔여 파일(`app/routers/`, `app/services/`, `app/schemas/`, `app/core/VDB/`, `app/core/llm/llm.py`, `app/core/web_search_agent/`, `app/core/Preprocessor/`, `app/charts.py`, `backends/pdfs/`)은 어디에도 연결돼 있지 않다.
-- 규제 트리거 노드는 법령 서브그래프가 없어(`legal_runner=None`) 질문만 만들고 건너뛴다.
+- 법령 질문 1건 약 50초(M1, 리랭커 bge-reranker-v2-m3를 MPS로, 후보 20개). 앱 시작 때 Weaviate·Neo4j가 꺼져 있으면 법령 리서치 없이 뜬다. 코퍼스를 바꾸면 `PYTHONPATH=. python scripts/ingest_law.py`(임베딩 0.01달러 미만).
 
 ## 알려진 버그 (2026-10-12)
 
