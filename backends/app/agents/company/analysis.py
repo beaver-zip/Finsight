@@ -483,6 +483,16 @@ def _annual(c: dict) -> None:
                      "roe": ni / ((e + e0) / 2) * 100 if ni is not None and e and e0 else None,
                      "dps": dv.dps_common if dv else None})
         heads.append(str(y))
+        # 연간 실적도 사실표에 둔다(채팅에서 "최근 사업연도 매출액"을 슬롯으로 쓸 수 있게)
+        fy = f"FY{str(y)[2:]}"
+        F.add("rev", fy, f"매출액({y}년)", fmt.money(rev), rev, "KRW")
+        F.add("op", fy, f"영업이익({y}년)", fmt.money(op), op, "KRW")
+        F.add("ni", fy, f"지배주주 순이익({y}년)", fmt.money(ni), ni, "KRW")
+        if len(cols) >= 2:
+            prev = cols[-2]
+            for k, lab in (("rev", "매출액"), ("op", "영업이익")):
+                g = _growth(cols[-1][k], prev[k])
+                F.add(f"{k}_yoy", fy, f"{lab} 전년 대비({y - 1}년 → {y}년)", fmt.change(g), g, "%")
     # 최근 4개 분기와 최근 분기×4
     if len(qs) >= 5:
         last4 = qs[-4:]

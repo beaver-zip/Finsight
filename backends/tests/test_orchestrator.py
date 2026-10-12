@@ -178,3 +178,16 @@ def test_route_normalize_fixes_intent_task_mismatch():
     n = normalize(two)
     assert n.intent == "composite" and [t.agent for t in n.sub_tasks] == ["legal", "news"]
     assert normalize(Route(intent="chat", company=None, clarification=None, sub_tasks=[one.sub_tasks[0]])).sub_tasks == []
+
+
+def test_markdown_cites_filing_for_metric_claims():
+    from decimal import Decimal
+
+    from app.agents.orchestrator.synthesize import to_markdown
+    from app.domain.models import Citation, Metric
+    m = Metric(id="op", label="영업이익(2Q26)", period="2Q26", value=Decimal("1"), unit="KRW", formula="", text="2.6조원")
+    cites = [Citation(kind="filing", id="20260814000001", label="반기보고서 (2026.06)",
+                      url="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260814000001")]
+    md = to_markdown([Claim(id="c1", text="영업이익은 {{op.2Q26}}입니다.", metric_ids=["op.2Q26"])],
+                     {"op.2Q26": m}, cites)
+    assert md.startswith("영업이익은 2.6조원입니다.[1]") and "1. [반기보고서 (2026.06)]" in md

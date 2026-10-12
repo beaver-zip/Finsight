@@ -60,7 +60,9 @@ async def run_item(t: LawTools, item: dict, p: dict[str, Any], graph=None) -> di
         context = st.get("context") or []
         ans = st.get("answer")
         ranked = [h.article.key for h in seeds]
+        q_score = st.get("q_score")
     else:
+        q_score = None
         seeds = (await l1_rank(t, item["question"], cfg.alpha, cfg.limit) if stage == "L1"
                  else await t.search_law(item["question"], k=10, alpha=cfg.alpha, limit=cfg.limit))
         ranked = [h.article.key for h in seeds]
@@ -71,7 +73,7 @@ async def run_item(t: LawTools, item: dict, p: dict[str, Any], graph=None) -> di
             pool = [h.model_copy(update={"path": [h.article.key]}) for h in seeds[:cfg.k]] + ext
             context = sorted(pool, key=lambda h: -h.score)[:cfg.context_k]
         ans = None
-    top = seeds[0].score if seeds else 0.0
+    top = q_score if q_score is not None else (seeds[0].score if seeds else 0.0)
     out["top_score"] = top
     out["ranked"] = ranked[:10]
     out["context"] = [h.article.key for h in context]
