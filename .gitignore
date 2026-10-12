@@ -22,3 +22,11 @@ frontends/*/.env
 backends/data/cache/
 backends/data/*.sqlite*
 backends/data/scratch/
+_workspace/
+
+# 개인 작업 메모·에이전트 지시문(공개 레포에 올리지 않는다)
+CLAUDE.md
+CLAUDE.local.md
+docs/eval_review.md
+docs/LOCAL_SETUP.md
+docs/design.md
