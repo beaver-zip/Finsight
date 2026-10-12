@@ -86,8 +86,8 @@ backends/
 | --- | --- | --- |
 | `core/law/`(lawgo\_client, parser, pdf\_ingest, pdf\_pages, vector\_store, graph\_store), `core/reranker.py`, `domain/citations.py`, `scripts/ingest_law.py` | 법령 적재·검색·인용 그래프 | 법령 리서치 에이전트 |
 | `agents/legal/` | 법령 서브그래프와 도구 | 법령 리서치 에이전트 |
-| `agents/orchestrator/`, `agents/news/graph.py`·`tools.py`, `memory/` | 라우터·합성, 뉴스·웹 에이전트, 체크포인터·Store | 오케스트레이터와 채팅 |
-| `api/chat.py`, `api/documents.py`, `api/admin.py`, `api/legacy.py` | 채팅 SSE, 업로드 문서, 법령 적재, v1 경로 호환 | API 계약 |
+| `agents/orchestrator/`(router, subagents, synthesize, graph) | 라우터, 하위 과업 실행, 합성, 그래프·체크포인터 타입 | 오케스트레이터와 채팅 |
+| `api/chat.py`, `api/documents.py`(설계), `api/admin.py`(설계) | 채팅 SSE, 업로드 문서, 법령 적재 | API 계약 |
 | `eval/`(datasets, configs, cassettes, metrics, runners) | 평가셋과 러너 | 평가 설계 |
 
 v1 파일 중 `core/llm/llm.py`, `core/VDB/`, `core/Preprocessor/`, `core/web_search_agent/`, `routers/`, `schemas/`, `services/`, `charts.py`, `pdfs/`는 레포에 남아 있지만 v2 앱에 연결돼 있지 않다. 법령·채팅을 옮기면서 위 표의 모듈로 바꾸고 지운다. SearchApi 키가 든 `test_web_agent.py`, 노트북, 레포 루트의 `main.py`·`requirements.txt` 삭제와 v1 결과 CSV 이동은 커밋 `fab3d38`에서 했다.
@@ -641,7 +641,7 @@ class LegalAnswer(BaseModel):
 
 ## 오케스트레이터와 채팅
 
-아직 코드가 없다. v2 앱에는 `POST /chat`도, 프론트가 부르는 v1 경로(`/rag/*`, `/web-agent/*`, `/files/*`)도 연결돼 있지 않아서 지금 백엔드로는 채팅·법령 검색·문서 업로드 화면이 동작하지 않는다. 오케스트레이터는 질문을 다섯 의도(legal·company·news·composite·chat)로 분류해 서브에이전트로 보내고, composite 질문은 하위 과업 2–3개로 나눠 병렬로 돌린 뒤 `synthesize`가 합친다. chat을 뺀 모든 최종 답변은 검증 노드를 거친다.
+구현했다(2026-10-12, `agents/orchestrator/`, `api/chat.py`, 프론트 `pages/Chatbot.tsx`). 오케스트레이터는 질문을 다섯 의도(legal·company·news·composite·chat)로 분류해 하위 과업으로 보내고, composite 질문은 하위 과업 2–3개를 병렬로 돌린 뒤 `synthesize`가 합친다. chat을 뺀 모든 최종 답변은 검증 노드를 거친다. 프론트 채팅 화면은 `POST /chat`을 부르고, v1 경로 호환(`api/legacy.py`)은 만들지 않았다(결정 사항 참고).
 
 ### 라우터 (`agents/orchestrator/router.py`)
 
@@ -650,87 +650,66 @@ class SubTask(BaseModel):
     agent: Literal["legal", "company", "news"]
     instruction: str             # 대화 맥락의 지시어를 풀어 쓴 독립 질문
 
-class MemoryUpdate(BaseModel):
-    summary_length: Literal["short", "normal", "long"] | None
-    prefer_tables: bool | None
-
 class Route(BaseModel):
     intent: Literal["legal", "company", "news", "composite", "chat"]
     company: str | None
     sub_tasks: list[SubTask]     # 단일 의도면 1개, composite면 2–3개, chat이면 0개
     clarification: str | None    # 의도나 대상 기업을 정할 수 없을 때 되물을 질문
-    memory: MemoryUpdate | None
 ```
 
-- v1의 RAG/CHAT 2분류와 사용자가 고르던 드롭다운을 대체한다. 드롭다운은 "자동(기본) · 법령 · 기업 · 뉴스"로 남기고, `mode`가 `auto`가 아니면 `intent`를 그 값으로 바꾼다.
-- 라우터 입력은 `messages` 전체와 사용자 선호다. "그럼 위반하면 과태료는?" 같은 후속 질문은 앞 대화의 대상을 넣은 독립 질문으로 바꿔 `SubTask.instruction`에 넣고, 서브에이전트는 대화 기록 없이 이 지시문만 받는다.
-- 기업명은 `resolve_company`로 `corp_code`를 찾는다. 이름이 같은 회사, 없으면 이름에 질의어가 든 회사(상장사 먼저, 최대 5개)가 후보이고, 상장사가 있으면 상장사만 남긴다. 후보가 2개 이상이거나 `clarification`이 있으면 `interrupt()`로 묻는다.
-- `chat`은 기존 `/rag/guide`의 기능 안내 응답이다.
+- Haiku 5.5(effort low) 구조화 출력. 입력은 최근 10개 메시지다(그보다 앞은 쓰지 않는다). 개수 조건은 `validate`로 검사한다.
+- 드롭다운은 "자동(기본) · 법령 · 기업 · 뉴스"이고, `mode`가 `auto`가 아니면 그 agent의 과업만 남긴다(없으면 질문 그대로 하나 만든다).
+- "그럼 위반하면 과태료는?" 같은 후속 질문은 앞 대화의 대상을 넣은 독립 질문으로 바꿔 `SubTask.instruction`에 넣고, 하위 과업은 대화 기록 없이 이 지시문만 받는다.
+- 기업 후보(`listed_candidates`): 이름이 같은 상장사 → 이름에 질의어가 든 상장사(대략적 시가총액 순, 최대 5개) → 없으면 비상장사. 6·8자리 숫자는 종목코드·corp\_code로 찾는다. '삼성'처럼 이름이 같은 비상장사(주식회사 삼성)가 있어도 상장사 후보를 먼저 보여 준다. 후보가 2개 이상이거나 없거나, `clarification`이 있으면 `interrupt()`로 묻는다(최대 2회).
+- `chat`은 기능 안내 응답이다(Haiku, effort low, 2–4문장).
 
 ### 그래프 (`agents/orchestrator/graph.py`)
 
-`load_memory` → `summarize`(필요할 때만) → `route` → `fan_out`(하위 과업마다 `Send`) → `run_<agent>` → `synthesize` → `verify` → 실패 시 `revise`(최대 2회) → `save_memory` 순서다. `chat` 의도는 `route` 뒤 안내문을 만들고 `save_memory`를 거쳐 끝난다. `synthesize`는 하위 결과를 `Claim` 목록(`FinalAnswer.claims`)으로 합치고, `verify`는 기업 분석 리포트와 같은 검증 노드다. 2회 뒤에도 실패한 주장은 사유가 '부분'이면 "(근거 불충분)"을 붙여 남기고 나머지는 지운다.
+`start`(턴마다 결과 비우기) → `route` → `clarify`(되묻기) → `run_task`(하위 과업마다 `Send`) → `synthesize` → `verify` → 실패 시 `revise`(최대 2회) → `finish`. `chat` 의도는 `clarify` 뒤 `guide`로 끝난다. `synthesize`는 하위 결과를 `Claim` 목록으로 합치고(Haiku, effort medium, 구조화 출력, 재무 숫자는 `{{id}}` 슬롯), `verify`는 기업 분석 리포트와 같은 검증 노드다. 2회 뒤에도 실패한 주장은 사유가 '부분'이면 "(근거 불충분)"을 붙여 남기고 나머지는 지운다.
+
+- 법령 과업 하나뿐이면 `synthesize`를 건너뛰고 법령 답변의 문단을 그대로 `Claim`으로 검증한다. 문단의 근거는 그 문단이 인용한 조문 + 답변 전체가 인용한 조문이다(요약 문단은 인용이 없다). 이 경로는 재작성하지 않는다: 합성 단계에는 조문 원문이 없어 고쳐 쓰면 근거가 빠진 답이 됐다(2026-10-12 관찰). 떨어진 문단만 빼거나 표시한다.
+- 기업 과업은 리포트 그래프·캐시(7일)를 그대로 쓰고, 사실표(id·이름·표시값), 검증을 거친 본문 블록, 기사 목록을 합성에 넘긴다. 정기보고서나 사실표가 없으면 그 과업을 실패로 넘긴다.
+- 답변 마크다운은 슬롯을 표시값으로 바꾸고, 기사 `[n1]`과 조문 근거를 끝의 "출처" 번호 목록으로 바꾼다. 법령 단독 답변은 법령 렌더링(핵심 요약·상세 내용·참고 문헌)을 쓴다.
 
 ```python
 def add_or_reset(old: list, new: list | None) -> list:
-    return [] if new is None else old + new        # load_memory가 None을 보내 턴마다 비운다
+    return [] if new is None else old + new        # start가 None을 보내 턴마다 비운다
 
 class OrchestratorState(TypedDict):
     messages: Annotated[list[AnyMessage], add_messages]
+    mode: str
     route: Route | None
-    results: Annotated[list[SubResult], add_or_reset]   # operator.add면 체크포인터가 이전 턴 결과를 쌓는다
-    answer: FinalAnswer | None
+    corp: CorpProfile | None
+    results: Annotated[list[SubResult], add_or_reset]       # operator.add면 체크포인터가 이전 턴 결과를 쌓는다
+    evidence: Annotated[list[EvidencePart], add_or_reset]   # 검증용 도구 출력(사실표·기사 본문·조문)
+    claims: list[Claim]
     verification: VerificationResult | None
+    answer: FinalAnswer | None
     attempts: int
 ```
 
-### 서브에이전트와 도구
+### 하위 과업 (`agents/orchestrator/subagents.py`)
 
-| 서브에이전트 | 구현 | 이유 |
+| 과업 | 구현 | 이유 |
 | --- | --- | --- |
-| 기업 분석 | 리포트와 같은 고정 `StateGraph`. 결과 `CompanyReport`의 사실표·블록을 `SubResult`로 넘긴다 | 출력 형식이 고정되고 재현성이 필요하다 |
-| 법령 리서치 | `StateGraph` + 충분성 루프 | 검색·확장·재검색 횟수를 고정해 단계별로 평가해야 한다 |
-| 뉴스·웹 | `create_agent` + 도구 | 질의를 바꿔 가며 찾는 열린 탐색이다 |
+| 기업 분석 | 리포트와 같은 고정 `StateGraph`(`build_report`, 7일 캐시) | 출력 형식이 고정되고 재현성이 필요하다 |
+| 법령 리서치 | 법령 서브그래프(충분성 루프) | 검색·확장·재검색 횟수를 고정해 단계별로 평가해야 한다 |
+| 뉴스 | 리포트의 뉴스 파이프라인을 한 번 호출 | 비용·동작이 예측 가능하다. 대상 기업이 없는 뉴스 질문은 다루지 않는다(2026-10-12 결정) |
 
-```python
-news_agent = create_agent(
-    model=agent_model(),                    # ChatAnthropic, claude-haiku-5-5
-    tools=[plan_queries, search_news, search_web, fetch_article, rank_articles],
-    system_prompt=NEWS_AGENT_PROMPT,
-    middleware=[ModelCallLimitMiddleware(run_limit=8),
-                ToolCallLimitMiddleware(tool_name="search_news", run_limit=2),
-                ToolCallLimitMiddleware(tool_name="search_web", run_limit=2),
-                ToolRetryMiddleware()],
-)
-# 최종 NewsFindings는 루프가 끝난 뒤 대화를 텍스트로 직렬화한 user 턴 하나로 structured()에 넘겨 만든다
-```
+출력에는 출처 ID(rcept\_no, 조문 key, 기사 id·URL)가 붙고, 검증 노드와 인용은 이 ID만 쓴다.
 
-| 도구 | 쓰는 곳 | 입력 → 출력 | 성격 |
-| --- | --- | --- | --- |
-| `resolve_company` | 공통 | 기업명·코드 → `CorpProfile` | 결정론적 |
-| `get_disclosures` | 기업·뉴스 | corp\_code, 기간, 유형 → `list[Disclosure]` | 결정론적(구현) |
-| `search_law`, `get_article`, `get_annex`, `expand_citations` | 법령 | 질의·key → `ArticleHit`·`Article`·`Annex` | 검색·결정론적 |
-| `plan_queries`, `rank_articles` | 뉴스 | 기업·측면 → `QueryPlan`, 기사 → 선택 5건 | LLM + 결정론적 점수(파이프라인 함수 재사용) |
-| `search_news`, `search_web`, `fetch_article` | 뉴스 | 질의·URL → 검색 결과·본문 | 검색(구현) |
+### 메모리
 
-출력에는 출처 ID(rcept\_no, 조문 key, URL)가 붙고, 검증 노드와 인용은 이 ID만 쓴다.
-
-### 메모리 (`memory/`)
-
-- 단기: `AsyncSqliteSaver`. `thread_id`는 프론트가 채팅 창마다 만든 UUID다. `messages`가 20,000토큰(`count_tokens`)을 넘으면 `summarize`가 최근 6개 메시지를 뺀 나머지를 요약 메시지 하나로 바꾼다.
-- 장기: `AsyncSqliteStore`(벡터 인덱스 없이 namespace·key 조회). `user_id`는 프론트가 localStorage에 저장한 UUID이고 `context`로 넘긴다. Postgres로 옮길 때는 `AsyncPostgresSaver`·`AsyncPostgresStore`로 바꾼다.
-
-| 네임스페이스 | 키 | 값 | 읽는 곳 |
-| --- | --- | --- | --- |
-| `("users", user_id, "prefs")` | `"format"` | 요약 길이, 표 선호 | `synthesize` 시스템 프롬프트 |
-
-관심 기업 목록은 프론트에 보여 줄 화면이 없어 두지 않는다. "지난 리포트 대비 변화"(바뀐 지표의 이전 값 → 현재 값, 새로 선택된 기사)는 리포트 v2에 자리가 없어, 그 저장(리포트별 지표 스냅샷)도 자리를 정할 때 함께 설계한다.
+- 단기만 둔다: `AsyncSqliteSaver`(`data/state.sqlite`). `thread_id`는 프론트가 채팅 창마다 만든 UUID이고, "새 대화"를 누르면 새로 만든다. 라우터·안내는 최근 10개 메시지만 본다.
+- 장기 메모리(사용자 선호), 대화 요약, 관심 기업 목록은 두지 않는다(결정 사항 참고).
+- 체크포인트에 들어가는 pydantic·dataclass 타입은 `allowed_msgpack_modules`에 등록한다(`graph.STATE_TYPES`). 새 타입을 상태에 넣으면 여기에 더한다.
 
 ### 스트리밍과 실행 제한
 
-- `graph.astream(..., stream_mode=["updates", "custom", "messages"], subgraphs=True)`로 진행과 초안 토큰을 SSE로 보낸다. 노드의 진행 이벤트와 SDK 스트림 토큰은 `get_stream_writer()`로 `custom`에 쓰고, `messages`는 뉴스·웹 에이전트 토큰만 잡는다. 리포트 SSE(`/report/{corp_code}/stream`)는 이 방식의 `updates`·`custom`으로 이미 동작한다.
-- `token`은 검증 전 초안이고, 클라이언트는 `final`을 받으면 초안을 검증된 답으로 바꾼다. `interrupt()`가 걸리면 `interrupt` 이벤트를 보내고, 같은 `thread_id`의 `resume`을 `Command(resume=...)`로 재개한다.
-- 실행 제한: 오케스트레이터 `recursion_limit=50`, 뉴스·웹 에이전트 호출 제한(모델 8회, `search_news`·`search_web` 각 2회), 외부 HTTP 10초·Claude 120초, 요청당 토큰 상한(`REQUEST_TOKEN_BUDGET`). 토큰 상한에 닿으면 그때까지의 결과로 답하고 `error`(`code: "TOKEN_BUDGET"`, `partial: true`)를 보낸다.
+- `graph.astream(..., stream_mode=["updates", "custom"], subgraphs=True)`로 노드 진행과 진행 문구를 SSE로 보낸다. 노드의 진행 문구는 `get_stream_writer()`로 `custom`에 쓴다. 답변은 구조화 출력이라 토큰 단위 `token` 이벤트는 보내지 않고, 프론트가 `final`의 마크다운을 타자 효과로 보여 준다.
+- `interrupt()`가 걸리면 `interrupt` 이벤트(`question`, `options`)를 보내고, 같은 `thread_id`의 `resume`을 `Command(resume=...)`로 재개한다. 프론트는 선택지 버튼이나 입력창의 답을 `resume`으로 보낸다.
+- 실행 제한: 오케스트레이터 `recursion_limit=50`, 외부 HTTP 10초·Claude 120초. 요청당 토큰 상한(`TOKEN_BUDGET` 이벤트)은 아직 없다.
+- 측정(2026-10-12, M1, 서버가 켜진 상태): 안내 4.6초·0.0003달러, 법령 67초·0.0043달러, 기업(리포트 캐시 있음) 43초·0.0079달러, 뉴스(기사 캐시 있음) 25초·0.0094달러.
 
 ## 평가 설계
 
@@ -832,7 +811,7 @@ python -m eval.compare eval/results/L3/<ts> eval/results/L4/<ts>   # 쌍 비교�
 
 ## API 계약
 
-프론트가 쓰는 기존 경로는 요청·응답 형식을 그대로 두고, 스트리밍 채팅과 구조화 리포트 경로를 더한다.
+프론트 채팅은 `POST /chat`으로 바꿨고 v1 채팅 경로(`/rag/query` 등)는 두지 않는다. 업로드·지식베이스 경로는 아직 없어 프론트에서 숨겼다.
 
 | 경로 | 요청 | 응답 | 상태 |
 | --- | --- | --- | --- |
@@ -841,23 +820,20 @@ python -m eval.compare eval/results/L3/<ts> eval/results/L4/<ts>   # 쌍 비교�
 | `GET /report/{corp_code}/json` | — | `CompanyReport` | 구현 |
 | `POST /financial/corp_list` | `{keyword}` | 기업 목록 | 구현 |
 | `GET /health/budget` | — | 누적 비용, 서비스별 비용, Tavily 크레딧 | 구현 |
-| `POST /chat` | `{thread_id, user_id, message, mode, resume}` | SSE | 설계. `mode`는 `auto`·`legal`·`company`·`news` |
-| `POST /rag/query`, `/rag/advanced_query`, `/web-agent/agent/web-search` | `{query}` | 기존 형식 | 설계(`api/legacy.py`). 내부에서 새 서브그래프 호출 |
-| `POST /rag/analyze_intention`, `/rag/guide` | `{query}` | 기존 형식 | 설계. 라우터 결과를 기존 형식으로 변환 |
+| `POST /chat` | `{thread_id, user_id, message, mode, resume}` | SSE: `node`, `progress`, `interrupt`(`question`, `options`), `final`(`answer`, `cost_usd`), `error` | 구현. `mode`는 `auto`·`legal`·`company`·`news` |
 | `POST /files/upload-pdf/`, `/files/download-pdf/` | multipart, `{file_name}` | 기존 형식 | 설계(`api/documents.py`). 파일명·크기·형식 검사 |
 | `POST /rag/register`, `GET /rag/show_files_in_collection`, `POST /rag/delete_objects_from_file_name` | 기존 | 기존 형식 | 설계. 삭제는 업로드 문서만 |
 | `POST /admin/legal/ingest`, `/admin/legal/reset` | — | 작업 결과 | 설계. `X-Admin-Token` 필요 |
 
 리포트 경로의 오류는 OpenDART 요청 한도 429, 예산 초과 402, OpenDART 오류 502, 그 밖 500이다. 스트림에서는 같은 경우를 `error` 이벤트의 `code`(`DART_LIMIT`, `BUDGET`, `INTERNAL`)로 보내고, 노드 실패로 일부가 빠진 리포트는 `PARTIAL`로 알린 뒤 `final`을 보낸다.
 
-채팅 SSE 이벤트는 여섯 종류다. `ns`는 LangGraph 서브그래프 네임스페이스다.
+채팅 SSE 이벤트는 다섯 종류다. `ns`는 LangGraph 서브그래프 네임스페이스다(하위 과업 안 법령·리포트 그래프의 노드는 `["chat", "run_task"]`).
 
 ```text
-event: node       data: {"ns": ["company"], "node": "collect", "status": "end"}
-event: progress   data: {"stage": "news.search", "detail": "측면별 질의 3개 검색 중"}
-event: token      data: {"text": "…"}
+event: node       data: {"ns": ["chat", "run_task"], "node": "retrieve", "status": "end"}
+event: progress   data: {"stage": "chat.legal", "detail": "법령 검색: …"}
 event: interrupt  data: {"question": "어느 기업인가요?", "options": ["…", "…"]}
-event: final      data: {"answer": {…}, "citations": […], "verification": {…}}
+event: final      data: {"answer": {"claims": […], "markdown": "…", "citations": […], "route": {…}, "verification": {…}}, "cost_usd": 0.0043}
 event: error      data: {"code": "DART_LIMIT", "message": "…", "partial": true}
 ```
 
@@ -869,12 +845,12 @@ class Citation(BaseModel):
     url: str | None          # law.go.kr 조문, https://dart.fss.or.kr/dsaf001/main.do?rcpNo={rcept_no}, 기사 원문
     pdf: PdfLocation | None
 
-class FinalAnswer(BaseModel):  # 설계
+class FinalAnswer(BaseModel):  # agents/orchestrator/graph.py
     claims: list[Claim]      # synthesize의 구조화 출력. 검증·재작성의 단위
     markdown: str
     citations: list[Citation]
-    route: Route
-    verification: VerificationResult
+    route: Route | None
+    verification: VerificationResult | None   # 안내(chat)와 거절 답은 None
 ```
 
 ## 결정 사항
@@ -920,8 +896,8 @@ class FinalAnswer(BaseModel):  # 설계
 | 검증 노드 | 구현(리포트) | 채팅 연결은 설계 |
 | 기업×법령 협업 | 트리거·질문 작성만 구현 | 법령 서브그래프가 없어 건너뛴다 |
 | 법령 리서치(적재, 검색, 인용 그래프, 참조 해석기, 서브그래프) | 구현 | 리포트 규제 노드에 연결. 채팅 연결, 참조 해석기 정확도 측정(100개 표본), dev 튜닝은 아직 없다. 질문 1건 약 50초(모델을 올린 뒤, 리랭크 약 25초) |
-| 오케스트레이터, 뉴스·웹 에이전트, 메모리, `POST /chat` | 설계 |  |
-| v1 경로 호환, 문서 업로드, 관리 API | 설계 | v2 앱에 없어서 프론트의 채팅·법령 검색·업로드 화면이 동작하지 않는다 |
+| 오케스트레이터, 단기 메모리, `POST /chat`, 프론트 채팅 화면 | 구현 | 뉴스·웹 에이전트와 장기 메모리는 만들지 않기로 했다. 요청당 토큰 상한 없음 |
+| 문서 업로드, 관리 API | 설계 | v2 앱에 없어 프론트의 지식베이스(업로드) 버튼을 숨겼다. v1 경로 호환은 만들지 않는다 |
 | 평가셋, 러너, CI, gitleaks | 설계 | 단위 테스트 53개만 있다 |
 
 미확정 사양:
