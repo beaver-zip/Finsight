@@ -26,6 +26,7 @@ from eval import judge
 from eval.common import dataset
 
 ROWS = {"revenue": "매출액", "operating_income": "영업이익", "net_income": "지배순이익"}
+FACT = {"revenue": "rev", "operating_income": "op", "net_income": "ni"}
 TOL = 0.005
 
 
@@ -53,7 +54,9 @@ def numeric_scores(data: dict | None, fs_div: str | None, gold: list[dict]) -> d
         cells = rows.get(label)
         if not cells or year not in heads:
             continue
-        v = parse_cell(cells[heads.index(year)], div)
+        fact = (data.get("facts") or {}).get(f"{FACT[g['metric']]}.FY{year[2:]}")
+        # 사실표의 정확한 값을 먼저 쓴다(표는 억원·십억원 반올림이라 작은 값은 0.5%를 넘게 어긋난다)
+        v = float(fact["value"]) if fact and fact.get("value") is not None else parse_cell(cells[heads.index(year)], div)
         if v is None:
             continue
         given += 1
