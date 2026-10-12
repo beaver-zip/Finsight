@@ -1,0 +1,5 @@
+id: N2
+suite: news
+description: "N1 + 커버리지 재검색"
+compare_to: N1
+params: {coverage_retry: true}

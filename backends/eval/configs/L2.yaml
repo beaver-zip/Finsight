@@ -1,0 +1,5 @@
+id: L2
+suite: legal
+description: "L1 + 리랭커(bge-reranker-v2-m3), 답변 포함"
+compare_to: L1
+params: {stage: L2, alpha: 0.5, answer: true}

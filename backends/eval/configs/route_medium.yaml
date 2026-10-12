@@ -1,0 +1,5 @@
+id: route_medium
+suite: routing
+description: "라우팅 effort 탐색: medium"
+compare_to: route
+params: {effort_override: {chat.route: medium}}

@@ -107,3 +107,10 @@ def write_summary(run_dir: Path, cfg: Config, split: str, metrics: dict[str, Any
 
 def rng(seed: int = 20261012) -> random.Random:
     return random.Random(seed)
+
+
+async def init_paid_apis() -> None:
+    """평가 스크립트 시작 때 Tavily 무료 잔여 크레딧을 읽는다. 읽지 않으면 모든 검색을 유료로 장부에 적는다."""
+    from app.core.search import tavily
+
+    await tavily.init_free_credits()
