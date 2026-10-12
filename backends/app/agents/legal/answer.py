@@ -10,6 +10,8 @@ import re
 from datetime import date
 from urllib.parse import quote
 
+import logging
+
 from app.agents.legal.tools import LawTools, doc_text, short_name
 from app.core import llm
 from app.domain.models import Annex, Article, ArticleHit, CitedSpan, LegalAnswer, LegalPoint
@@ -20,8 +22,10 @@ SYSTEM = """너는 전자금융 법령을 조사해 답하는 법무 리서처�
 - 이어서 쟁점마다 한 문단씩 쓰고, 문단마다 근거 조문을 인용한다. 문단 사이는 빈 줄로 나눈다.
 - 조문에 없는 내용, 조문 밖의 일반론, 실무 조언을 쓰지 않는다. 조문으로 답할 수 없는 쟁점은 "제공된 조문에서 확인되지 않는다"고 쓴다.
 - 법령명은 정식 명칭으로 쓴다(예: 전자금융거래법 시행령 제11조의4제4항).
-- 머리말, 소제목, 목록 기호, 맺음말을 쓰지 않는다."""
+- 조문 문구를 길게 그대로 옮겨 적지 말고 요지를 너의 문장으로 쓴다.
+- 존댓말(~습니다)로 쓴다. 머리말, 소제목, 목록 기호, 맺음말을 쓰지 않는다."""
 
+log = logging.getLogger(__name__)
 LAW_URL = "https://www.law.go.kr/법령/{name}/{art}"
 ADMRUL_URL = "https://www.law.go.kr/행정규칙/{name}"
 
@@ -97,7 +101,13 @@ def points_from(resp, docs: list[Article | Annex]) -> list[LegalPoint]:
                 para = d.paragraphs[c.start_block_index].no
             cites.append(CitedSpan(source=c.source, paragraph_index=para, cited_text=c.cited_text))
         if cites and _is_quote(b.text, cites):
-            parts = [""]                     # 조문 원문을 그대로 옮긴 조각: 본문에서 빼고 인용만 남긴다
+            # 조문 원문을 그대로 옮긴 조각. 문장 뒤에 덧붙었거나 괄호 안이면 빼고 인용만 남기고,
+            # 문장 중간에 목적어로 들어갔으면("제2항은 [원문]고 규정한다") 따옴표로 감싸 남긴다
+            prev = cur_text.rstrip()
+            if not prev or prev.endswith(("(", ".", "다", "요", ":")):
+                parts = [""]
+            else:
+                parts = [f"“{b.text.strip()}”"]
         cur_text += parts[0]
         for extra in parts[1:]:
             flush()
@@ -112,6 +122,11 @@ async def build_answer(question: str, context: list[ArticleHit], tools: LawTools
     docs = [h.article for h in context]
     resp = await llm.cited(question, search_results(docs), system=SYSTEM, effort="medium", task="legal.answer")
     points = points_from(resp, docs)
+    if not any(p.citations for p in points):     # 인용 없이 답하는 경우가 가끔 있다(2026-10-12 관찰): 한 번 더 요청
+        log.warning("법령 답변에 인용이 없어 다시 요청한다")
+        resp = await llm.cited(question + "\n\n(각 문단의 근거 조문을 반드시 인용하라.)", search_results(docs),
+                               system=SYSTEM, effort="medium", task="legal.answer")
+        points = points_from(resp, docs)
     cited = {c.source for p in points for c in p.citations}
     paths = [h.path for h in context if h.article.key in cited and len(h.path) > 1]
     notes = []
