@@ -1,0 +1,77 @@
+{
+ "config": "R",
+ "suite": "report",
+ "split": "all",
+ "params": {
+  "max_new": 4
+ },
+ "metrics": {
+  "claims_dropped_R2": {
+   "mean": 0.0,
+   "lo": 0.0,
+   "hi": 0.0,
+   "n": 4
+  },
+  "flagged_R2": {
+   "mean": 0.011363636363636364,
+   "lo": 0.0,
+   "hi": 0.03409090909090909,
+   "n": 4
+  },
+  "num_coverage": {
+   "mean": 1.0,
+   "lo": 1.0,
+   "hi": 1.0,
+   "n": 4
+  },
+  "num_error": {
+   "mean": 0.0,
+   "lo": 0.0,
+   "hi": 0.0,
+   "n": 4
+  },
+  "num_match": {
+   "mean": 1.0,
+   "lo": 1.0,
+   "hi": 1.0,
+   "n": 4
+  },
+  "support_R1": {
+   "mean": 0.8139822134387352,
+   "lo": 0.7613636363636362,
+   "hi": 0.866600790513834,
+   "n": 4
+  },
+  "support_R2": {
+   "mean": 0.8797619047619047,
+   "lo": 0.8089285714285714,
+   "hi": 0.95,
+   "n": 4
+  },
+  "untraceable_rate_R1": {
+   "mean": 0.0,
+   "lo": 0.0,
+   "hi": 0.0,
+   "n": 4
+  },
+  "verify_fail_rate_R1": {
+   "mean": 0.277832674571805,
+   "lo": 0.19202898550724637,
+   "hi": 0.3952569169960474,
+   "n": 4
+  }
+ },
+ "meta": {
+  "judge": "google/gemini-2.5-flash (임시 judge)",
+  "note": "R1=첫 초안(검증 전), R2=검증·재작성 뒤. 수치는 2025 사업연도 주요계정과 대조",
+  "ops": {
+   "latency_p50_s": 104.66,
+   "latency_p95_s": 147.11,
+   "cost_total_usd": 0.0669,
+   "cost_per_item_usd": 0.01673,
+   "errors": 0
+  },
+  "n_items": 4
+ },
+ "runs": "1회 실행"
+}

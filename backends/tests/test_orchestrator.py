@@ -191,3 +191,10 @@ def test_markdown_cites_filing_for_metric_claims():
     md = to_markdown([Claim(id="c1", text="영업이익은 {{op.2Q26}}입니다.", metric_ids=["op.2Q26"])],
                      {"op.2Q26": m}, cites)
     assert md.startswith("영업이익은 2.6조원입니다.[1]") and "1. [반기보고서 (2026.06)]" in md
+
+
+def test_dedupe_phrase():
+    from app.agents.orchestrator.synthesize import dedupe_phrase
+    assert dedupe_phrase("영업이익률은 42개 분기 중 42개 분기 중 5위입니다") == "영업이익률은 42개 분기 중 5위입니다"
+    assert dedupe_phrase("45일 마다 바꾼다") == "45일 마다 바꾼다"
+    assert dedupe_phrase("매출과 매출액") == "매출과 매출액"

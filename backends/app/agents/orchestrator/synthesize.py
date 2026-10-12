@@ -36,7 +36,7 @@ SYNTH_SYSTEM = """너는 금융 리서치 챗봇이다. 사용자 질문에 함�
 
 [근거]
 - 재무·시세 숫자는 직접 쓰지 않고 사실표 id를 {{id}}로 쓴다(예: "영업이익은 {{op.2Q26}}"). 쓴 id는 metric_ids에 넣는다.
-- 슬롯 자리에는 사실표의 값이 그대로 들어간다. 값에 하위·상위·증가·감소·상회·하회가 들어 있으면 슬롯 앞뒤에 같은 말을 다시 쓰지 않는다.
+- 슬롯 자리에는 사실표의 값이 그대로 들어간다. 값에 들어 있는 말(하위·상위·증가·감소·상회·하회, "42개 분기 중 5위"의 "42개 분기 중" 등)을 슬롯 앞뒤에 다시 쓰지 않는다.
 - 기사에서 온 사실은 문장 끝에 [n1]처럼 기사 id를 붙이고 news_ids에 넣는다. 기사 숫자는 기사 표기 그대로 쓴다.
 - 법령 답변에서 온 내용은 legal_keys에 그 조문 key(예: "전자금융거래법:21-2")를 넣는다.
 - 자료에 없는 숫자·사실·전망을 쓰지 않는다. 매수·매도·목표주가 같은 투자 권유를 쓰지 않는다.
@@ -83,6 +83,14 @@ def norm_key(k: str) -> str:
     return re.sub(r"\s+", "", law) + (":" + rest.strip() if rest else "")
 
 
+_DUP = re.compile(r"(?<!\S)((?:\S+ ){1,3}\S+) \1(?!\S)")
+
+
+def dedupe_phrase(t: str) -> str:
+    """슬롯 앞에 표시값의 앞부분을 또 써서 생기는 겹침을 지운다("42개 분기 중 42개 분기 중 5위" → "42개 분기 중 5위")."""
+    return _DUP.sub(r"\1", t)
+
+
 def to_markdown(claims: list[Claim], metrics: dict[str, Metric], citations: list[Citation]) -> str:
     """슬롯을 표시값으로 바꾸고, 기사 [n1]·조문은 끝의 출처 목록 번호로 바꾼다."""
     used: list[str] = []
@@ -97,7 +105,7 @@ def to_markdown(claims: list[Claim], metrics: dict[str, Metric], citations: list
 
     paras = []
     for c in claims:
-        t = render(c.text, metrics)
+        t = dedupe_phrase(render(c.text, metrics))
         t = re.sub(r"\s*\[(n\d+)\]", lambda m: ref(m.group(1)), t)
         marks = "".join(ref(k) for k in c.legal_keys)
         if c.metric_ids or SLOT.search(c.text):            # 리포트 숫자를 쓴 문단은 정기보고서 공시를 출처로 단다
