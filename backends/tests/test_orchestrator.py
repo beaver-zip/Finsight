@@ -165,3 +165,16 @@ async def test_legal_only_is_not_rewritten_on_failure(monkeypatch, patched):
     out = await g.ainvoke({"messages": [HumanMessage("q")], "mode": "auto"}, config=_cfg("t6"))
     md = out["answer"].markdown
     assert "시행령 별표 1에 정해져" in md and "학위와 경력" not in md
+
+
+def test_route_normalize_fixes_intent_task_mismatch():
+    from app.agents.orchestrator.router import normalize
+    one = Route(intent="composite", company="x", clarification=None,
+                sub_tasks=[SubTask(agent="company", instruction="a")])
+    assert normalize(one).intent == "company"
+    two = Route(intent="legal", company=None, clarification=None,
+                sub_tasks=[SubTask(agent="legal", instruction="a"), SubTask(agent="news", instruction="b"),
+                           SubTask(agent="legal", instruction="c")])
+    n = normalize(two)
+    assert n.intent == "composite" and [t.agent for t in n.sub_tasks] == ["legal", "news"]
+    assert normalize(Route(intent="chat", company=None, clarification=None, sub_tasks=[one.sub_tasks[0]])).sub_tasks == []

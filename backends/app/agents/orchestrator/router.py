@@ -55,13 +55,24 @@ def recent_text(messages: list[AnyMessage], n: int = RECENT) -> str:
 
 
 def _check(r: Route) -> str | None:
-    if r.intent == "chat":
-        return None if not r.sub_tasks else "chat이면 sub_tasks는 빈 리스트"
-    if r.intent == "composite":
-        return None if 2 <= len(r.sub_tasks) <= 3 else "composite면 sub_tasks 2~3개"
-    if len(r.sub_tasks) != 1 or r.sub_tasks[0].agent != r.intent:
-        return f"{r.intent}면 agent가 {r.intent}인 sub_task 1개"
+    """고칠 수 없는 경우만 거부한다(나머지는 normalize가 바로잡는다)."""
+    if r.intent != "chat" and not r.sub_tasks:
+        return f"{r.intent}면 sub_tasks가 1개 이상 있어야 한다"
     return None
+
+
+def normalize(r: Route) -> Route:
+    """의도와 과업 수가 어긋나면 과업 쪽에 맞춘다: 과업 1개면 그 agent의 단일 의도, 2개 이상이면 composite(최대 3개),
+    chat이면 과업을 비운다. 같은 agent 과업이 겹치면 첫 것만 남긴다(2026-10-12: 검사로 거부하면 채팅 전체가 실패했다)."""
+    if r.intent == "chat":
+        return r.model_copy(update={"sub_tasks": []})
+    seen, tasks = set(), []
+    for t in r.sub_tasks:
+        if t.agent not in seen:
+            seen.add(t.agent)
+            tasks.append(t)
+    intent = tasks[0].agent if len(tasks) == 1 else "composite"
+    return r.model_copy(update={"intent": intent, "sub_tasks": tasks[:3]})
 
 
 def apply_mode(r: Route, mode: str, question: str) -> Route:
@@ -77,4 +88,4 @@ async def route(messages: list[AnyMessage], mode: str = "auto") -> Route:
     r = await llm.structured(Route, [{"role": "user", "content": recent_text(messages)}], system=ROUTER_SYSTEM,
                              effort="low", task="chat.route", validate=_check)
     question = messages[-1].content if messages and isinstance(messages[-1].content, str) else ""
-    return apply_mode(r, mode, question)
+    return apply_mode(normalize(r), mode, question)
