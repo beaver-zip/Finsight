@@ -713,16 +713,16 @@ class OrchestratorState(TypedDict):
 
 ## 평가 설계
 
-평가셋과 러너는 아직 없다(`eval/results/v1-legacy/`만 있다). 지금 있는 검증은 단위 테스트 53개다. 모든 지표는 버전 관리되는 평가셋에서 어블레이션의 직전 설정과 다음 설정을 같은 문항으로 짝지어 비교하고, 차이에는 95% 신뢰구간을 붙인다. 유료 API 비용은 개발과 평가를 합쳐 10달러 이내다.
+평가셋 초안과 러너를 구현했다(2026-10-12, `backends/eval/`). 평가셋은 LLM 초안이고 사람 검수 전이라, 지금 결과는 dev 예비 실행이다. 단위 테스트는 94개다. 모든 지표는 버전 관리되는 평가셋에서 어블레이션의 직전 설정과 다음 설정을 같은 문항으로 짝지어 비교하고, 차이에는 95% 신뢰구간을 붙인다. 유료 API 비용은 개발과 평가를 합쳐 10달러 이내다.
 
 ### 공통 규칙
 
 - 평가셋은 `eval/datasets/`에 jsonl·csv로 두고 파일명에 버전을 붙인다(`legal_qa.v1.jsonl`). 30%를 dev, 70%를 test로 나눈다(층화: `legal_qa`는 유형, `report_companies`는 층, `routing`은 의도, `news_labels`는 기업 단위). 임계값·가중치·α·judge 선택은 dev에서만 하고 결과표 수치는 test에서만 낸다. `composite_tasks`·`multiturn`은 전부 test다.
-- 라벨은 Haiku 5.5가 Message Batches로 초안을 만들고 사람이 검수한다. 검수에서 고친 항목 수와 비율을 결과표에 싣는다.
-- 설정 파일 `eval/configs/*.yaml` 하나가 실험 하나다. 결과는 `eval/results/<config>/<timestamp>/`에 문항별 jsonl(LangSmith `run_id` 포함)과 `summary.md`로 남긴다.
+- 라벨은 Haiku 5.5가 일반 호출로 초안을 만들고(`eval/build/*.py`) 사람이 검수한다. 검수에서 고친 항목 수와 비율을 결과표에 싣는다. 리포트 수치 정답(`report_gold`)만은 주요계정 API 값을 그대로 쓰고 사람이 검수하지 않는다.
+- 설정 파일 `eval/configs/*.yaml` 하나가 실험 하나다. 결과는 `eval/results/<config>/<timestamp>/`에 문항별 `items.jsonl`(점수·지연·비용)과 `summary.json`·`summary.md`(지표·95% CI·운영 지표)로 남긴다. 작업별 effort·역할 덮어쓰기(`effort_override`, `role_override`)는 설정의 params로 준다.
 - LLM이 들어간 단계는 문항마다 1회만 실행하고 결과표에 "1회 실행"이라고 적는다. 응답 캐시(`LLM_CACHE=true`)가 있어 재실행은 같은 결과를 낸다.
-- 외부 HTTP(OpenDART, Tavily, 법령 API, 기사 수집)는 녹화·재생 프록시(mitmproxy)로 `eval/cassettes/`에 녹화한다. 녹화본에는 키를 남기지 않는다: `Authorization` 헤더와 쿼리의 `crtfc_key`·`OC`를 지우고, 재생할 때도 이 값을 뺀 요청끼리 맞춘다. 녹화본에 없는 요청은 실제로 호출해 더하고 신규 건수를 적는다.
-- 뉴스가 필요한 문항의 기업은 `news_labels`의 8개 기업으로 한정해 Tavily 녹화본을 함께 쓴다.
+- 외부 HTTP 응답은 녹화 프록시 대신 SQLite 응답 캐시(`data/cache/cache.sqlite`)로 재현한다(2026-10-12 결정). OpenDART 재무 응답은 만료 없이, Tavily는 7일, 법령 API는 7일 캐시된다. LLM 답변과 judge 판정도 캐시(judge는 영구)로 같은 결과를 낸다. 평가 스크립트는 시작할 때 Tavily 무료 잔여 크레딧을 읽어 장부에 무료 검색을 비용으로 적지 않는다.
+- 뉴스가 필요한 문항의 기업은 `news_labels`의 8개 기업으로 한정한다. 뉴스 후보 풀은 파이프라인을 여러 번 돌려 URL 기준으로 합쳤다(실행마다 질의가 달라 후보가 달라진다).
 - 예상 비용은 라벨 초안 약 0.5달러, 평가 실행 약 4달러, 개발 중 호출 약 3달러다. 검색은 약 200크레딧(평가 최대 100, 개발 약 100)으로 무료 플랜 안이다. 발표자료의 RAGAS 수치는 데이터셋·코드가 없어 재현할 수 없으므로 인용하지 않는다.
 
 ### 평가셋
@@ -746,7 +746,9 @@ class OrchestratorState(TypedDict):
  "answerable": true, "as_of": "2025-02-05", "source": "llm_draft+human"}
 ```
 
-리포트 정답(`report_gold.v1.jsonl`)은 `{corp_code, rcept_no, metric, period, value, verified_by}`이고 v2 코드와 독립적으로 만든다. Haiku 5.5가 `fnlttSinglAcntAll` 응답에서 지표 입력 줄의 초안을 고르고 사람이 검수하며, `eval/metrics/numeric.py`가 v2와 따로 구현한 식으로 계산한다. 주요 계정은 `fnlttSinglAcnt` 값과 대조해 0.5% 넘게 다르면 다시 확인한다. 리포트 v2는 분석 절의 분기 값(사실표 id `rev.2Q26`, `fcf.H126` 등)을 쓰므로, 정답의 (지표, 기간)을 사실표 id에 맞춘 대응표가 필요하다.
+만든 초안(2026-10-12): `legal_qa` 100(단일 30, 다중 홉 30, 별표 15, 수치 10, 답 없음 15. 별표는 제목의 "관련 조문" 또는 별표를 참조하는 조문과 짝지었다), `routing` 100, `composite_tasks` 10, `multiturn` 10대화(46턴), `report_companies` 16(대형주 한화오션·기아, 코스닥 진로발효·중앙에너비스, 지주사 한국앤컴퍼니·코스맥스비티아이, 금융사 키움증권·카카오페이, 12월 외 결산 현대약품·기신정기, 정정 공시 디씨엠·시알홀딩스, 연결 없는 회사 경보제약·우양피앤엘, 적자 기업 코오롱글로벌·OCI), `news_labels` 168건(8개 기업, 현대약품 3건·시알홀딩스 1건처럼 기사가 적은 회사가 있다), `report_gold` 80항목. dev/test는 legal_qa 29/71, routing 30/70, report 8/8, 뉴스 기업 2/6이다.
+
+리포트 정답(`report_gold.v1.jsonl`)은 `{corp_code, rcept_no, metric, period, value, verified_by}`이고 v2 코드와 독립적으로 만든다. 2025 사업연도 주요계정(`fnlttSinglAcnt`)의 매출액·영업이익·당기순이익·자본총계·자산총계를 그대로 정답으로 쓴다(사람 검수 없음, 2026-10-12 결정). 리포트 연간 표의 매출액·영업이익과 대조하고, 순이익은 정답이 비지배 포함 당기순이익이라 별도 재무제표 회사에서만 비교한다. 자본·자산은 리포트 표에 없어 커버리지에서 빠진다. 리포트 v2는 분석 절의 분기 값(사실표 id `rev.2Q26`, `fcf.H126` 등)을 쓰므로, 정답의 (지표, 기간)을 사실표 id에 맞춘 대응표가 필요하다.
 
 ### 지표
 
@@ -784,8 +786,8 @@ class OrchestratorState(TypedDict):
 
 ### 통계
 
-- 문항 단위 부트스트랩(1,000회)으로 95% 신뢰구간을 내고, 두 구성은 같은 문항 쌍의 차이로 부트스트랩한다. 이진 결과는 McNemar 검정(양측)도 보고한다.
-- judge: 사람이 `legal_qa` dev 30문항에 라벨하고, OpenRouter의 Claude 외 후보 2–3개 중 Cohen's κ가 가장 높은 모델을 고른다. κ가 0.6 미만이면 루브릭을 고쳐 다시 잰다(최대 3회). 최종 κ는 test 30문항으로 한 번만 재고, 0.6 미만이면 그 30문항의 사람 라벨 결과를 싣는다.
+- 문항 단위 부트스트랩(1,000회)으로 95% 신뢰구간을 내고, 두 구성은 같은 문항 쌍의 차이로 부트스트랩한다(`eval/compare.py`). 이진 결과는 McNemar 정확 검정(양측)도 보고한다.
+- judge: 사람이 `legal_qa` dev 답변의 핵심 사실마다 O/X를 표시하고(`eval/calibrate_judge.py --make`가 만든 CSV), OpenRouter의 Claude 외 후보 3개(`google/gemini-2.5-flash`, `openai/gpt-oss-120b`, `deepseek/deepseek-v4-flash`) 중 Cohen's κ가 가장 높은 모델을 고른다. 고르기 전에는 `google/gemini-2.5-flash`를 임시 judge로 쓰고 결과에 그렇게 적는다. κ가 0.6 미만이면 루브릭을 고쳐 다시 잰다(최대 3회). 최종 κ는 test 30문항으로 한 번만 재고, 0.6 미만이면 그 30문항의 사람 라벨 결과를 싣는다.
 
 ### 러너와 CI
 
@@ -794,8 +796,10 @@ python -m eval.run --suite legal --config eval/configs/L4.yaml
 python -m eval.compare eval/results/L3/<ts> eval/results/L4/<ts>   # 쌍 비교표 + 신뢰구간
 ```
 
-- PR마다 GitHub Actions가 스모크 세트(법령 15, 라우팅 10, 리포트 5)를 녹화본과 커밋된 응답 캐시로 돌린다(유료 API 호출 없음). 캐시에 없는 LLM 요청은 실패로 처리한다. 스모크 지표가 v2 브랜치의 마지막 결과보다 하나라도 낮으면 실패한다.
-- 전체 평가는 비용 장부가 있는 환경에서 수동으로 돌리고, 결과표는 README의 평가 절에 남긴다. 평가셋은 LangSmith 데이터셋으로도 올린다.
+- CI는 단위 테스트만 돌린다. 스모크 평가는 두지 않는다(2026-10-12 결정).
+- 평가는 비용 장부가 있는 로컬에서 수동으로 돌리고, 결과표는 README의 평가 절에 남긴다. 검수가 끝난 평가셋은 LangSmith 데이터셋으로도 올린다(`eval/upload_langsmith.py`).
+- 뉴스 가중치 격자(materiality·relevance·recency 각 3값)와 중복 임계값 {0.85, 0.88, 0.91}은 N2 실행의 분류된 후보로 점수·MMR만 다시 계산해 dev nDCG@5로 고른다(`eval/tune_news.py`, 검색·LLM 비용 없음).
+- 리포트·복합 과업 스위트는 새 회사 1곳에 OpenDART 요청이 100~200건이라 실행마다 회사 수를 제한하고(`max_new`, `--limit`) 며칠에 나눠 돌린다.
 
 ### 단위 테스트 (`tests/`)
 
