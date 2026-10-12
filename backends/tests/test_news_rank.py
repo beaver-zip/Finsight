@@ -50,3 +50,21 @@ def test_source_tier():
     assert source_tier("https://biz.chosun.com/x") == 1.0
     assert source_tier("https://blog.naver.com/x") == 0.0
     assert source_tier("https://v.daum.net/v/1") == 0.5
+
+
+async def test_embed_empty_and_pipeline_without_hits(monkeypatch):
+    from app.agents.news import pipeline as P
+    from app.core.embeddings import embed
+    from app.domain.models import CorpProfile
+
+    assert (await embed([])).shape == (0, 1024)
+
+    async def plans(*a, **k):
+        return []
+
+    async def none(*a, **k):
+        return []
+    monkeypatch.setattr(P, "plan_queries", plans)
+    monkeypatch.setattr(P, "_search_all", none)
+    res = await P.run_pipeline(CorpProfile(corp_code="1", corp_name="작은회사"), [], http=None)
+    assert res.items == [] and res.note == "최근 기사를 찾지 못했다"
