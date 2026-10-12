@@ -45,6 +45,7 @@ class NewsResult:
     coverage_aspects: int
     median_age_days: float | None
     researched: bool
+    n_initial: int = 0                   # 커버리지 재검색 전 후보 수(candidates[:n_initial]이 N1 후보)
 
 
 # ---------- 1. 질의 계획 ----------
@@ -246,6 +247,15 @@ async def run_pipeline(corp: CorpProfile, disclosures: list[Disclosure], *, http
         picked = [reps[i] for i in mmr_select(reps, rsim)]
         return reps, picked
 
+    if not pool:                     # 질의가 너무 좁아 0건이면 회사 이름만으로 1년 범위를 한 번 더 찾는다
+        broad = [QueryPlan(aspect=ASPECTS[0], query=name, must_include=[name])]
+        pool = await _to_candidates(_interleave_cap(await _search_all(broad, "year", http, q_offset=len(plans)),
+                                                    MAX_CANDIDATES), http, start=0)
+        plans += broad
+    n_initial = len(pool)
+    if not pool:                     # 그래도 없으면(소형주 등) 기사 없음
+        return NewsResult(items=[], note="최근 기사를 찾지 못했다", queries=plans, candidates=[], coverage_aspects=0,
+                          median_age_days=None, researched=False)
     reps, picked = await rank(pool)
     cov = coverage(picked, ASPECTS, now=now)
 
@@ -284,4 +294,4 @@ async def run_pipeline(corp: CorpProfile, disclosures: list[Disclosure], *, http
         med = f"{cov.median_age_days:.0f}일" if cov.median_age_days is not None else "알 수 없음"
         note = f"커버리지 미달: 덮은 측면 {cov.aspects}개, 기사 나이 중앙값 {med}"
     return NewsResult(items=items, note=note, queries=plans, candidates=pool, coverage_aspects=cov.aspects,
-                      median_age_days=cov.median_age_days, researched=researched)
+                      median_age_days=cov.median_age_days, researched=researched, n_initial=n_initial)

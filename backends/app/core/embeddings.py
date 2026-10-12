@@ -17,6 +17,8 @@ RETRY_DELAYS = (2, 5, 10, 20, 0)
 
 async def embed(texts: list[str], *, http: httpx.AsyncClient | None = None) -> np.ndarray:
     """정규화된 임베딩 행렬(len(texts) × 1024)."""
+    if not texts:
+        return np.zeros((0, 1024), dtype=np.float32)
     s = get_settings()
     cache = get_cache()
     keys = [make_key(s.embedding_model, t) for t in texts]
