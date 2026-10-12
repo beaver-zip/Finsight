@@ -1,6 +1,6 @@
 """법령 리서치 서브그래프: 질문 분석 → 검색·리랭크(시드) → 인용 그래프 확장 → 충분성 판단 ⇄ 재검색(최대 2회) → 답변.
 
-답할 근거가 없으면(시드 최고 점수 < 임계값, 또는 재검색 2회 뒤에도 부족) cited()를 부르지 않고 상위 조문 제목만 돌려준다.
+시드 최고 점수가 임계값 미만이면 cited()를 부르지 않고 상위 조문 제목만 돌려준다. 재검색 2회 뒤에도 부족하면 찾은 조문으로 답한다.
 """
 from __future__ import annotations
 
@@ -52,6 +52,7 @@ class LegalState(TypedDict, total=False):
     context: list[ArticleHit]
     missing: list[str]
     loops: int
+    low_score: bool                 # 시드 최고 리랭크 점수가 임계값 미만(거절)
     answer: LegalAnswer | None
     texts: dict[str, str]           # 답변에 넘긴 조문 key → 본문(검증용)
     errors: Annotated[list[str], operator.add]
@@ -125,7 +126,7 @@ async def judge(state: LegalState, config: RunnableConfig) -> dict:
     c = _cfg(config)
     seeds = state.get("seeds") or []
     if not seeds or seeds[0].score < c.threshold:
-        return {"missing": [], "loops": c.max_loops + 1}            # 근거 없음 → 거절
+        return {"missing": [], "low_score": True}                   # 근거 없음 → 거절
     ctx = "\n\n".join(f"[{short_name(h.article.key)}] {doc_text(h.article)[:1200]}" for h in state["context"])
     try:
         s = await llm.structured(Sufficiency, [{"role": "user", "content": SUFF_PROMPT.format(
@@ -138,10 +139,14 @@ async def judge(state: LegalState, config: RunnableConfig) -> dict:
 
 
 def after_judge(state: LegalState, config: RunnableConfig) -> str:
+    """거절은 시드 점수가 임계값 미만일 때만 한다. 재검색 2회 뒤에도 부족하다고 나오면 찾은 조문으로 답하고,
+    빠진 쟁점은 답변이 "제공된 조문에서 확인되지 않는다"고 쓴다(2026-10-12 사용자 결정: 쟁점이 여럿인 질문에서
+    충분성 판단이 실행마다 달라 같은 질문이 답하기도, 거절되기도 했다)."""
     c = _cfg(config)
-    loops = state.get("loops") or 0
-    if loops > c.max_loops:
+    if state.get("low_score"):
         return "refuse"
+    if (state.get("loops") or 0) > c.max_loops:
+        return "answer"
     return "retrieve" if state.get("missing") else "answer"
 
 
