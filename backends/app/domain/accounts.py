@@ -27,16 +27,17 @@ STANDARD: dict[str, AccountSpec] = {
                               ("당기순이익", "반기순이익", "분기순이익", "당기순이익(손실)", "반기순이익(손실)",
                                "분기순이익(손실)")),
     "net_income_owners": AccountSpec(PL, ("ifrs-full_ProfitLossAttributableToOwnersOfParent",),
-                                     ("지배기업소유주지분", "지배기업의소유주지분")),
+                                     ("지배기업소유주지분", "지배기업의소유주지분", "지배기업주주지분순이익",
+                                      "지배기업소유주지분순이익")),
     "total_assets": AccountSpec(("BS",), ("ifrs-full_Assets",), ("자산총계",)),
     "current_assets": AccountSpec(("BS",), ("ifrs-full_CurrentAssets",), ("유동자산",)),
     "total_liabilities": AccountSpec(("BS",), ("ifrs-full_Liabilities",), ("부채총계",)),
     "current_liabilities": AccountSpec(("BS",), ("ifrs-full_CurrentLiabilities",), ("유동부채",)),
     "total_equity": AccountSpec(("BS",), ("ifrs-full_Equity",), ("자본총계",)),
     "equity_owners": AccountSpec(("BS",), ("ifrs-full_EquityAttributableToOwnersOfParent",),
-                                 ("지배기업소유주지분", "지배기업의소유주지분")),
+                                 ("지배기업소유주지분", "지배기업의소유주지분", "지배기업주주지분")),
     "cfo": AccountSpec(("CF",), ("ifrs-full_CashFlowsFromUsedInOperatingActivities",),
-                       ("영업활동현금흐름", "영업활동으로인한현금흐름")),
+                       ("영업활동현금흐름", "영업활동으로인한현금흐름", "영업활동으로부터의현금흐름")),
     # 현금흐름의 질·순현금·운전자본·주주환원(리포트 v2)
     "capex": AccountSpec(("CF",), ("ifrs-full_PurchaseOfPropertyPlantAndEquipment",),
                          ("유형자산의취득", "유형자산취득", "유형자산의증가")),
@@ -45,7 +46,7 @@ STANDARD: dict[str, AccountSpec] = {
     "buyback": AccountSpec(("CF",), ("ifrs-full_PaymentsToAcquireOrRedeemEntitysShares",),
                            ("자기주식의취득", "자기주식취득", "자기주식의매입")),
     "dividends_paid": AccountSpec(("CF",), ("ifrs-full_DividendsPaidClassifiedAsFinancingActivities",),
-                                  ("배당금의지급", "배당금지급", "현금배당금의지급")),
+                                  ("배당금의지급", "배당금지급", "현금배당금의지급", "보통주배당지급")),
     "cash": AccountSpec(("BS",), ("ifrs-full_CashAndCashEquivalents",), ("현금및현금성자산",)),
     "st_fin": AccountSpec(("BS",), ("ifrs-full_ShorttermDepositsNotClassifiedAsCashEquivalents",),
                           ("단기금융상품",)),
@@ -65,7 +66,7 @@ STANDARD: dict[str, AccountSpec] = {
 CASH_LIKE = ("cash", "st_fin", "st_amort", "st_fvpl")
 DEBT_LIKE = ("st_borrow", "cur_ltd", "bonds", "lt_borrow")
 
-_LEAD = re.compile(r"^(?:[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+\.|\d+\.|\(\d+\)|[가-하]\.)")
+_LEAD = re.compile(r"^(?:[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩIVX]+\.|\d+\.|\(\d+\)|[가-하]\.)")
 _NOTE = re.compile(r"\((?:주|주석)\s*[\d,\s]+\)")
 
 
