@@ -1,0 +1,89 @@
+{
+ "dev_companies": 2,
+ "best": {
+  "dedup_threshold": 0.85,
+  "weights": {
+   "materiality": 0.3125,
+   "relevance": 0.25,
+   "recency": 0.125,
+   "volume": 0.125,
+   "disclosure": 0.125,
+   "source": 0.0625
+  },
+  "ndcg@5": 0.42168391928023935
+ },
+ "current": {
+  "dedup_threshold": 0.88,
+  "weights": {
+   "materiality": 0.35,
+   "relevance": 0.2,
+   "recency": 0.2,
+   "volume": 0.1,
+   "disclosure": 0.1,
+   "source": 0.05
+  },
+  "ndcg@5": 0.4074264369489972
+ },
+ "top5": [
+  {
+   "dedup_threshold": 0.85,
+   "weights": {
+    "materiality": 0.3125,
+    "relevance": 0.25,
+    "recency": 0.125,
+    "volume": 0.125,
+    "disclosure": 0.125,
+    "source": 0.0625
+   },
+   "ndcg@5": 0.42168391928023935
+  },
+  {
+   "dedup_threshold": 0.85,
+   "weights": {
+    "materiality": 0.2778,
+    "relevance": 0.3333,
+    "recency": 0.1111,
+    "volume": 0.1111,
+    "disclosure": 0.1111,
+    "source": 0.0556
+   },
+   "ndcg@5": 0.42168391928023935
+  },
+  {
+   "dedup_threshold": 0.85,
+   "weights": {
+    "materiality": 0.35,
+    "relevance": 0.3,
+    "recency": 0.1,
+    "volume": 0.1,
+    "disclosure": 0.1,
+    "source": 0.05
+   },
+   "ndcg@5": 0.42168391928023935
+  },
+  {
+   "dedup_threshold": 0.85,
+   "weights": {
+    "materiality": 0.3182,
+    "relevance": 0.2727,
+    "recency": 0.1818,
+    "volume": 0.0909,
+    "disclosure": 0.0909,
+    "source": 0.0455
+   },
+   "ndcg@5": 0.42168391928023935
+  },
+  {
+   "dedup_threshold": 0.85,
+   "weights": {
+    "materiality": 0.4091,
+    "relevance": 0.2727,
+    "recency": 0.0909,
+    "volume": 0.0909,
+    "disclosure": 0.0909,
+    "source": 0.0455
+   },
+   "ndcg@5": 0.42168391928023935
+  }
+ ]
+}

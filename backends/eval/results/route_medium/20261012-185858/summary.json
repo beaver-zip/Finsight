@@ -1,0 +1,49 @@
+{
+ "config": "route_medium",
+ "suite": "routing",
+ "split": "dev",
+ "params": {
+  "effort_override": {
+   "chat.route": "medium"
+  }
+ },
+ "metrics": {
+  "accuracy": {
+   "mean": 0.6333333333333333,
+   "lo": 0.4666666666666667,
+   "hi": 0.8,
+   "n": 30
+  },
+  "accuracy_ambiguous": {
+   "mean": 0.4375,
+   "lo": 0.1875,
+   "hi": 0.6875,
+   "n": 16
+  }
+ },
+ "meta": {
+  "macro_f1": 0.6248,
+  "f1_by_intent": {
+   "legal": 0.8,
+   "company": 0.6667,
+   "news": 0.2857,
+   "composite": 0.5714,
+   "chat": 0.8
+  },
+  "confusions": {
+   "news→composite": 5,
+   "legal→composite": 2,
+   "company→composite": 2,
+   "chat→company": 2
+  },
+  "ops": {
+   "latency_p50_s": 2.3449999999999998,
+   "latency_p95_s": 4.71,
+   "cost_total_usd": 0.0088,
+   "cost_per_item_usd": 0.00029,
+   "errors": 0
+  },
+  "n_items": 30
+ },
+ "runs": "1회 실행"
+}

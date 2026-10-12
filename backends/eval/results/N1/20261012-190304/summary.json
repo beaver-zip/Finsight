@@ -1,0 +1,65 @@
+{
+ "config": "N1",
+ "suite": "news",
+ "split": "dev",
+ "params": {
+  "coverage_retry": false
+ },
+ "metrics": {
+  "age_median_days": {
+   "mean": 36.5,
+   "lo": 25.0,
+   "hi": 48.0,
+   "n": 2
+  },
+  "aspects": {
+   "mean": 1.5,
+   "lo": 1.0,
+   "hi": 2.0,
+   "n": 2
+  },
+  "date_acc": {
+   "mean": 1.0,
+   "lo": 1.0,
+   "hi": 1.0,
+   "n": 1
+  },
+  "dup_rate": {
+   "mean": 0.3333333333333333,
+   "lo": 0.0,
+   "hi": 0.6666666666666666,
+   "n": 2
+  },
+  "ndcg@5": {
+   "mean": 0.3112346691902198,
+   "lo": 0.1449922944606284,
+   "hi": 0.4774770439198113,
+   "n": 2
+  },
+  "p@5": {
+   "mean": 0.4,
+   "lo": 0.2,
+   "hi": 0.6,
+   "n": 2
+  },
+  "unjudged": {
+   "mean": 0.0,
+   "lo": 0.0,
+   "hi": 0.0,
+   "n": 2
+  }
+ },
+ "meta": {
+  "note": "relevance≥1을 관련으로 본다. 라벨 풀 밖 선택은 관련 0(unjudged 비율 참고)",
+  "ops": {
+   "latency_p50_s": 11.145,
+   "latency_p95_s": 11.36,
+   "cost_total_usd": 0.0031,
+   "cost_per_item_usd": 0.00157,
+   "errors": 0
+  },
+  "n_items": 2,
+  "rescored": true
+ },
+ "runs": "1회 실행"
+}

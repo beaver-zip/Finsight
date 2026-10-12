@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+from datetime import datetime
 
 import httpx
 from pydantic import BaseModel
@@ -102,5 +103,48 @@ async def main() -> None:
     log.info("라벨 %d건", len(rows))
 
 
+async def from_runs(run_dirs: list[str]) -> None:
+    """평가 실행(N1·N2)에서 라벨 풀 밖 기사가 선택됐으면 그 기사도 풀에 더해 라벨 초안을 붙인다(풀링)."""
+    from app.domain.news_rank import Candidate
+
+    path = DATASETS / "news_labels.v1.jsonl"
+    rows = load_jsonl(path)
+    seen = {(r["corp_code"], r["url"]) for r in rows}
+    split = {r["corp_code"]: r["split"] for r in rows}
+    names = {r["corp_code"]: r["company"] for r in rows}
+    added = 0
+    for d in run_dirs:
+        for it in load_jsonl(f"{d}/items.jsonl"):
+            cands = {c["url"]: c for c in it.get("cands", [])}
+            new = [cands[u] for u in it.get("unjudged_urls", []) if u in cands and (it["id"], u) not in seen]
+            if not new:
+                continue
+            objs = []
+            for c in new:
+                c = {"body": None, **c}
+                c["published_at"] = datetime.fromisoformat(c["published_at"]) if c.get("published_at") else None
+                objs.append(Candidate(**{k: v for k, v in c.items() if k in Candidate.__dataclass_fields__}))
+            labs = {x.cid: x for x in await label(names.get(it["id"], it.get("company", "")), objs)}
+            for c in objs:
+                lb = labs.get(c.id)
+                seen.add((it["id"], c.url))
+                rows.append({"id": f"{it['id']}:{hashlib.sha1(c.url.encode()).hexdigest()[:10]}", "corp_code": it["id"],
+                             "company": names.get(it["id"], it.get("company")), "url": c.url, "title": c.title,
+                             "snippet": (c.snippet or "")[:300],
+                             "published_at": c.published_at.isoformat() if c.published_at else None,
+                             "pool": "eval_run", "system_picked": True,
+                             "relevance": lb.relevance if lb else None, "aspect": lb.aspect if lb else None,
+                             "materiality": lb.materiality if lb else None,
+                             "dup_group": f"{it['id']}:{lb.dup_group}" if lb else None,
+                             "published_label": lb.published if lb else None,
+                             "split": split.get(it["id"], "test"), "source": "llm_draft"})
+                added += 1
+    save_jsonl(path, rows)
+    log.info("풀에 더한 기사 %d건, 전체 %d건", added, len(rows))
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    import sys
+
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    asyncio.run(from_runs(sys.argv[2:]) if len(sys.argv) > 1 and sys.argv[1] == "--from-runs" else main())
