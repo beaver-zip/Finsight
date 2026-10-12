@@ -55,3 +55,14 @@ def test_names_and_routing():
     assert after_judge({"missing": [], "loops": 0}, cfg) == "answer"
     assert after_judge({"missing": ["x"], "loops": 2}, cfg) == "retrieve"
     assert after_judge({"missing": ["x"], "loops": 3}, cfg) == "refuse"
+
+
+def test_mid_sentence_quote_is_wrapped_not_dropped():
+    c = load_corpus()
+    d = c.get("전자금융거래법:21-2")
+    p2 = d.paragraphs[1].text
+    resp = NS(content=[NS(type="text", text="제2항은 ", citations=None),
+                       NS(type="text", text=p2[2:], citations=[_cite("전자금융거래법:21-2", 1, p2)]),
+                       NS(type="text", text="고 규정합니다.", citations=None)])
+    pts = points_from(resp, [d])
+    assert pts[0].text.startswith("제2항은 “총자산") and pts[0].text.endswith("”고 규정합니다.")

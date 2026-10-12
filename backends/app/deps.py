@@ -17,6 +17,7 @@ class AppState:
     company_graph: Any
     legal_runner: Any = None
     law_tools: Any = None
+    chat_graph: Any = None
 
 
 def get_state(request: Request) -> AppState:
