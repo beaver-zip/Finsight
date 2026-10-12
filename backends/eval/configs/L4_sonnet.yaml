@@ -1,0 +1,5 @@
+id: L4_sonnet
+suite: legal
+description: "생성 모델 비교: L4에서 법령 답변만 Sonnet 5.5(test 30문항)"
+compare_to: L4
+params: {stage: L4, alpha: 0.5, hops: 2, answer: true, role_override: {legal.answer: strong}, split: test, limit: 30}

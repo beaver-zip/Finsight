@@ -1,0 +1,5 @@
+id: L1_a75
+suite: legal
+description: "L1, α=0.75(α 탐색)"
+compare_to: L1
+params: {stage: L1, alpha: 0.75}

@@ -1,0 +1,5 @@
+id: L4
+suite: legal
+description: "L3(2홉) + 질의 계획·충분성 루프(서브그래프 전체), 답변 포함"
+compare_to: L3b
+params: {stage: L4, alpha: 0.5, hops: 2, answer: true}

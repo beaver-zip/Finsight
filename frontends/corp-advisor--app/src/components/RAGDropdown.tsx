@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
-import { FileSearch, Layers, Globe } from "lucide-react";
-import type { QueryMode } from "../hooks/useDynamicQuery";
+import { Sparkles, Scale, Building2, Newspaper } from "lucide-react";
+import type { QueryMode } from "../hooks/useChatStream";
 
 const options: {
   label: string;
@@ -9,22 +9,28 @@ const options: {
   hint: string;
 }[] = [
   {
-    label: "일반 분석",
-    value: "rag",
-    icon: <FileSearch size={14} />,
-    hint: "법령 벡터 검색으로 근거 조항을 찾아 답변합니다.",
+    label: "자동",
+    value: "auto",
+    icon: <Sparkles size={14} />,
+    hint: "질문을 보고 법령·기업·뉴스 중 필요한 쪽을 골라 답합니다.",
   },
   {
-    label: "심층 분석",
-    value: "advanced_rag",
-    icon: <Layers size={14} />,
-    hint: "검색된 조항이 인용한 참조 조문까지 함께 확장 검색합니다.",
+    label: "법령",
+    value: "legal",
+    icon: <Scale size={14} />,
+    hint: "전자금융거래법·시행령·감독규정·시행세칙 조문을 인용해 답합니다.",
   },
   {
-    label: "웹 서치",
-    value: "web_search",
-    icon: <Globe size={14} />,
-    hint: "웹에서 최신 자료를 수집해 요약·분석합니다.",
+    label: "기업",
+    value: "company",
+    icon: <Building2 size={14} />,
+    hint: "상장사의 실적·밸류에이션·주주환원을 공시와 시세로 답합니다.",
+  },
+  {
+    label: "뉴스",
+    value: "news",
+    icon: <Newspaper size={14} />,
+    hint: "기업의 최근 기사를 골라 요약합니다.",
   },
 ];
 

@@ -1,0 +1,4 @@
+id: route
+suite: routing
+description: "라우팅(현재 설정: effort low)"
+params: {}

@@ -1,121 +1,97 @@
-# Finsight: AI 금융 분석 어시스턴트
-Track1: AI Agent 개발 <K intelligence 해커톤 2025> 수상작 (3위)
-## 1. 프로젝트 소개
+# Finsight
 
-FinSight는 포괄적인 금융 정보와 분석을 제공하기 위해 설계된 AI 기반 금융 어시스턴트입니다. 사용자의 질문에 통찰력 있는 답변을 제공하기 위해 다양한 데이터 소스와 AI 기술을 통합합니다.
+전자금융 법령 리서치와 상장사 기업 분석을 하는 에이전트 시스템입니다. 법령 질문에는 조문을 인용해 답하고, 기업은 공시·시세·기사를 근거로 분석 리포트를 만듭니다.
 
-주요 기능은 다음과 같습니다:
-- **기업 재무 분석**: DART(전자공시시스템) 데이터를 사용하여 기업의 재무제표를 추출하고 분석합니다.
-- **RAG 기반 Q&A**: 검색 증강 생성(RAG) 기술을 사용하여 금융 규정 및 문서 등 사전 구축된 지식 베이스를 기반으로 사용자의 질문에 답변합니다.
-- **리포트 자동 생성**: 특정 기업에 대한 심층 분석 리포트를 자동으로 생성합니다.
-- **웹 검색 통합**: 웹 검색 에이전트를 활용하여 실시간 또는 일반 상식 질문에 대한 답변을 찾습니다.
+## 버전
 
-백엔드는 **FastAPI**로 구축되었으며, RAG 파이프라인의 효율적인 유사도 검색을 위해 **Weaviate**를 벡터 데이터베이스로 사용합니다.
+| 버전 | 위치 | 작업 |
+| --- | --- | --- |
+| v1 | 태그 `v1-hackathon`(커밋 4fe7118) | K intelligence 해커톤 2025 Track1(AI Agent 개발) 3위 수상작. 팀 작업(Yeyeong99, Kimyongari, hanseo) |
+| v2 | `v2` 브랜치 | v1을 바탕으로 다시 설계한 개인 작업(hanseo). 아래 내용은 v2 기준 |
 
-#### 시연 영상
-- [Report Agent](https://www.youtube.com/watch?v=xQm8__sc2js)
-- [RAG Agent](https://www.youtube.com/watch?v=BaZBrlYc3Uc)
+v1 시연 영상: [Report Agent](https://www.youtube.com/watch?v=xQm8__sc2js), [RAG Agent](https://www.youtube.com/watch?v=BaZBrlYc3Uc)
 
-## 2. 프로젝트 구조
+## v2에서 바뀐 것
 
-프로젝트는 백엔드와 프론트엔드 구조로 구성되어 있습니다. 핵심 로직은 `backends` 디렉토리에 있습니다.
+- **법령 리서치**: v1의 PDF 청크 검색 대신 국가법령정보 Open API의 조문 구조(조·항·별표)로 적재하고, 조문 사이의 참조·위임을 Neo4j 인용 그래프로 연결했습니다. 하이브리드 검색(Weaviate, `kagome_kr`) → 리랭크(bge-reranker-v2-m3) → 그래프 1~2홉 확장 → 근거 충분성 판단과 재검색 → Claude 인용 답변 순서입니다. "정보보호최고책임자 자격" 질문이면 법 제21조의2 → 시행령 제11조의4 → 시행령 별표 1로 이어지는 근거를 함께 찾습니다.
+- **기업 분석 리포트**: OpenDART 재무제표·공시와 시세로 실적, 밸류에이션(PBR 밴드·동종 업종), 현금흐름·주주환원, 잠정실적 발표 반응을 코드로 계산합니다. 본문은 Claude가 쓰되 재무 숫자는 사실표 id 슬롯으로만 쓰고 렌더러가 값으로 바꿉니다. 검증 노드가 숫자 출처·인용·주장 지지를 확인하고 실패한 문장은 다시 씁니다.
+- **뉴스**: 측면별 질의 → 기사 수집 → 임베딩 중복 묶기 → 관련도·중요도 분류 → 점수와 MMR로 5건 선택 → 요약.
+- **채팅**: 질문을 법령·기업·뉴스·복합·안내로 나눠 하위 과업을 병렬로 돌리고 답을 합칩니다. 기업명이 애매하면 되묻습니다(예: "삼성" → 삼성전자·삼성전기·…).
+- **평가**: 법령 QA 100, 라우팅 100, 리포트 기업 16, 뉴스 라벨 등 평가셋과 러너를 두고, 구성마다 같은 문항으로 짝지어 비교합니다(아래 '평가').
+
+설계와 결정 기록은 [docs/design.md](docs/design.md)에 있습니다.
+
+## 구조
 
 ```
-Finsight/
-├───backends/
-│   ├───main.py                # FastAPI 애플리케이션 진입점
-│   ├───app/
-│   │   ├───core/                # 핵심 비즈니스 로직 (DART 추출기, LLM, RAG, VDB)
-│   │   ├───routers/             # API 엔드포인트 정의
-│   │   ├───schemas/             # Pydantic 요청/응답 모델
-│   │   └───services/            # 각 라우터의 비즈니스 로직
-│   └───...
-├───docker-compose.yml         # 서비스용 Docker 설정 (예: Weaviate)
-├───requirements.txt           # Python 의존성 파일
-└───...
+backends/
+├── app/
+│   ├── core/          # 외부 클라이언트: OpenDART, 법령 API, Weaviate, Neo4j, Tavily, Claude, 임베딩, 리랭커, 캐시·비용 장부
+│   ├── domain/        # I/O 없는 계산: 계정 매핑, 사실표·슬롯, 참조 해석기, 뉴스 점수
+│   ├── agents/        # LangGraph: company(리포트), legal(법령), news(뉴스), orchestrator(채팅), verifier(검증)
+│   └── api/           # FastAPI: /report, /chat, /financial
+├── eval/              # 평가셋·설정·러너·결과
+├── scripts/           # 법령 적재, 상장사 목록, 키 확인
+└── tests/             # 단위 테스트
+frontends/corp-advisor--app/   # React + Vite(리포트 화면, 채팅 화면)
 ```
 
-## 3. 엔드포인트
+## API
 
-API는 각각 특정 도메인을 처리하는 여러 라우터로 나뉘며, 각 라우터에는 접두사(prefix)가 적용되어 있습니다.
+| 경로 | 내용 |
+| --- | --- |
+| `GET /report/{corp_code}` | 기업 분석 리포트 HTML(7일 캐시). `/stream`은 진행 단계를 SSE로, `/json`은 구조화 결과 |
+| `POST /chat` | 채팅(SSE). `{thread_id, message, mode, resume}`, `mode`는 `auto`·`legal`·`company`·`news` |
+| `POST /financial/corp_list` | 기업명 검색 |
+| `GET /health/budget` | 유료 API 누적 비용 |
 
-### `/financial`
-- **`GET /financial/health`**: financial 라우터의 상태를 확인합니다.
-- **`POST /financial/statement`**: 주어진 회사 코드에 대한 재무제표를 가져옵니다.
-  - **Request Body**: `{"company_code": "005930"}`
+## 실행
 
-### `/rag`
-- **`GET /rag/health`**: RAG 라우터의 상태를 확인합니다.
-- **`POST /rag/query`**: 사용자의 질문을 받아 RAG 파이프라인을 통해 생성된 답변을 반환합니다.
-  - **Request Body**: `{"query": "전자금융거래법의 주요 내용은 무엇인가요?"}`
+맥 로컬 환경 준비는 [docs/LOCAL_SETUP.md](docs/LOCAL_SETUP.md)를 따릅니다.
 
-### `/report`
-- **`GET /report/{stock_code}`**: 지정된 종목 코드에 대한 상세 기업 분석 리포트를 마크다운 형식으로 생성합니다.
-  - **Path Parameter**: `stock_code` (예: 삼성전자 - `005930`).
-
-### `/web-agent`
-- **`POST /web-agent/agent/web-search`**: 사용자의 질문으로 웹 검색 에이전트를 실행하고 최종 답변을 반환합니다.
-  - **Request Body**: `{"question": "2008년 금융 위기의 주요 원인은 무엇이었나요?"}`
-
-## 4. 시작하기
-
-### 사전 요구사항
-- Python 3.11
-- Node.js 20+
-- Docker 및 Docker Compose
-- `backends/.env` 구성:
-```
-OPENDART_API_KEY=            # DART OpenAPI 키
-SEARCHAPI_KEY=               # searchapi.io 키 (웹 검색)
-OPENROUTER_KEY=              # OpenRouter 키 (LLM + 임베딩 공용)
-OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
-MODEL=google/gemini-3.5-flash-lite   # 생성 모델
-EMBEDDING_MODEL_NAME=baai/bge-m3     # 임베딩 모델 (1024차원)
-WEAVIATE_URL=http://localhost:8090   # 로컬 실행 시. 컨테이너에서는 compose가 덮어씀
+```bash
+docker compose up -d weaviate neo4j                  # 벡터 DB·그래프 DB
+cd backends && source .venv/bin/activate
+PYTHONPATH=. python scripts/ingest_law.py            # 법령 적재(처음 한 번)
+uvicorn app.main:app --port 8000                     # 백엔드
+cd ../frontends/corp-advisor--app && npm run dev     # 프론트 http://localhost:5173
 ```
 
-> 임베딩은 OpenRouter의 `baai/bge-m3`(1024차원)를 사용합니다.
-> LLM과 임베딩이 같은 키/엔드포인트를 쓰므로 별도 임베딩 제공자 설정이 필요 없습니다.
+키는 `backends/.env`에 둡니다(Anthropic, OpenRouter, OpenDART, Tavily, 법령 API OC). 생성 모델은 Claude Haiku 5.5, 임베딩은 OpenRouter의 bge-m3입니다.
 
-### 설치 및 설정
+## 평가
 
-1.  **Repository Clone**
-    ```bash
-    git clone https://github.com/Kimyongari/Finsight.git
-    cd Finsight
-    ```
+평가셋 초안은 LLM이 만들고 사람이 검수합니다. 아래는 검수 전 초안 라벨로 dev 분할만 돌린 예비 결과이고, 결과표 수치는 검수 뒤 test 분할에서 다시 냅니다.
 
-2.  **전체 스택을 Docker로 실행**
-    ```bash
-    docker compose up -d --build
-    ```
-    - Weaviate: http://localhost:8090
-    - 백엔드: http://localhost:8000 (API 문서 http://localhost:8000/docs)
-    - 프론트엔드: http://localhost:5173
+```bash
+cd backends && PYTHONPATH=. python -m eval.run --config L4 --split dev
+PYTHONPATH=. python -m eval.compare eval/results/L3b/<ts> eval/results/L4/<ts>
+```
 
-3.  **로컬에서 개별 실행 (개발용)**
-    ```bash
-    # 벡터 DB만 컨테이너로
-    docker compose up -d weaviate
+### 예비 결과 (2026-10-12, dev, 초안 라벨)
 
-    # 백엔드
-    cd backends
-    python3.11 -m venv .venv && source .venv/bin/activate
-    pip install -r requirements.txt
-    python -m uvicorn main:app --port 8000
+judge는 κ로 고르기 전의 임시 모델(`google/gemini-2.5-flash`)이고, LLM 단계는 문항마다 1회 실행했습니다. 문항 수가 적어 신뢰구간이 넓습니다(구간은 `eval/results/<설정>/<시각>/summary.md`).
 
-    # 프론트엔드 (별도 터미널)
-    cd frontends/corp-advisor--app
-    npm install
-    npm run dev     # VITE_API_URL 은 .env 로 주입 (기본 http://localhost:8000)
-    ```
+법령 QA(dev 29문항: 답 있음 25, 그중 다중 홉 9, 답 없음 4)
 
-4.  **법령 문서 적재 (최초 1회)**
-    `backends/pdfs/` 의 PDF를 청크로 나눠 임베딩 후 Weaviate에 적재합니다.
-    ```bash
-    curl http://localhost:8000/rag/initialize
-    ```
-    적재 현황 확인:
-    ```bash
-    curl http://localhost:8000/rag/show_files_in_collection
-    ```
+| 구성 | Recall@10 | MRR | 경로 완결률 | 정답성 | 근거 충실도 | 인용 정밀도 / 재현율 | 거절 정확도 | 지연 P50 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| L1 하이브리드(α 0.5) | 0.96 | 0.86 | — | — | — | — | — | 1초 |
+| L2 + 리랭크 | 0.94 | 0.94 | 0.67 | 0.94 | 0.80 | 0.62 / 0.92 | 1.0 | 21초 |
+| L3a + 그래프 1홉 | 0.94 | 0.94 | 0.78 | 0.93 | 0.80 | 0.60 / 0.96 | 1.0 | 25초 |
+| L3b + 그래프 2홉 | 0.94 | 0.94 | 0.78 | 0.94 | 0.84 | 0.56 / 0.96 | 1.0 | 27초 |
+| L4 + 충분성 루프 | 0.96 | 0.85 | 0.78 | 0.91 | 0.74 | 0.57 / 0.90 | 1.0 | 50초 |
+
+- α는 0.25·0.5·0.75 중 0.5의 Recall@10이 가장 높았습니다(0.94·0.96·0.94).
+- 그래프 확장은 다중 홉 9문항 중 경로를 완결한 문항을 6개에서 7개로 늘렸습니다.
+
+그 밖의 스위트
+
+| 스위트 | 결과 |
+| --- | --- |
+| 라우팅(dev 30) | 정확도 0.63, macro-F1 0.62. effort low·medium·high가 0.63·0.63·0.60이라 low를 유지. 틀린 문항 다수는 "실적과 뉴스 같이"처럼 복합 질문을 단일 의도로 적은 라벨 오류 |
+| 멀티턴(test 36턴) | 후속 질문 해결률 0.50, 의도 일치 0.50 |
+| 뉴스(dev 2개 기업) | N1 P@5 0.40·nDCG@5 0.31, N2 P@5 0.50·nDCG@5 0.40 |
+| 리포트(dev 2개 기업) | 수치 일치율 1.0, 첫 초안 추적 불가 숫자 0, 첫 검증 실패율 0.13, 주장 지지율 R1 0.75 → R2 0.84 |
+| 복합 과업(2개) | 체크리스트 전 항목 충족 2/2 |
+

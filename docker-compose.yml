@@ -1,3 +1,5 @@
+# 로컬 개발에서는 DB 두 개만 띄우고(docker compose up -d weaviate neo4j) 백엔드·프론트는 직접 실행한다.
+# 자세한 순서는 docs/LOCAL_SETUP.md.
 services:
   weaviate:
     image: cr.weaviate.io/semitechnologies/weaviate:1.32.4
@@ -11,7 +13,26 @@ services:
       AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "true"
       PERSISTENCE_DATA_PATH: "/var/lib/weaviate"
       ENABLE_MODULES: "" # 벡터화 모듈 비활성화 (외부 임베딩 벡터를 직접 적재)
-      AUTOSCHEMA_ENABLED: false
+      DEFAULT_VECTORIZER_MODULE: "none"
+      AUTOSCHEMA_ENABLED: "false"
+      # 법령 본문 BM25용 한국어 형태소 토크나이저. 컬렉션을 만든 뒤에는 바꿀 수 없다
+      ENABLE_TOKENIZER_KAGOME_KR: "true"
+      GOMEMLIMIT: "1GiB"
+
+  neo4j:
+    image: neo4j:5.26-community
+    ports:
+      - 7474:7474 # 브라우저 http://localhost:7474
+      - 7687:7687 # bolt
+    restart: on-failure:0
+    volumes:
+      - ./neo4j_data:/data
+    environment:
+      # 로컬 전용 비밀번호. backends/.env의 NEO4J_PASSWORD와 같아야 한다
+      NEO4J_AUTH: "neo4j/finsight-local"
+      NEO4J_server_memory_heap_initial__size: "512m"
+      NEO4J_server_memory_heap_max__size: "1g"
+      NEO4J_server_memory_pagecache_size: "512m"
 
   backend:
     build: ./backends
@@ -21,11 +42,13 @@ services:
       - ./backends:/app
     depends_on:
       - weaviate
+      - neo4j
     env_file:
       - ./backends/.env
     environment:
       # 컨테이너 내부에서는 서비스명으로 접속한다. (.env의 localhost 설정을 덮어씀)
       WEAVIATE_URL: http://weaviate:8080
+      NEO4J_URI: bolt://neo4j:7687
 
   frontend:
     build:

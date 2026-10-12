@@ -1,0 +1,8 @@
+{"id": "00106641", "corp_code": "00106641", "stock_code": "000270", "name": "기아", "stratum": "대형주", "acc_mt": "12", "split": "test"}
+{"id": "00170877", "corp_code": "00170877", "stock_code": "018120", "name": "진로발효", "stratum": "코스닥", "acc_mt": "12", "split": "dev"}
+{"id": "00219574", "corp_code": "00219574", "stock_code": "044820", "name": "코스맥스비티아이", "stratum": "지주사", "acc_mt": "12", "split": "test"}
+{"id": "01244601", "corp_code": "01244601", "stock_code": "377300", "name": "카카오페이", "stratum": "금융사", "acc_mt": "12", "split": "dev"}
+{"id": "00164706", "corp_code": "00164706", "stock_code": "004310", "name": "현대약품", "stratum": "12월 외 결산", "acc_mt": "11", "split": "test"}
+{"id": "00148984", "corp_code": "00148984", "stock_code": "000480", "name": "시알홀딩스", "stratum": "정정 공시", "acc_mt": "12", "split": "test"}
+{"id": "00133618", "corp_code": "00133618", "stock_code": "002420", "name": "우양피앤엘", "stratum": "연결 없는 회사", "acc_mt": "12", "split": "test"}
+{"id": "01760738", "corp_code": "01760738", "stock_code": "456040", "name": "OCI", "stratum": "적자 기업", "acc_mt": "12", "split": "test"}

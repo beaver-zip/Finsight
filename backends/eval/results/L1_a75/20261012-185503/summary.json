@@ -1,0 +1,59 @@
+{
+ "config": "L1_a75",
+ "suite": "legal",
+ "split": "dev",
+ "params": {
+  "stage": "L1",
+  "alpha": 0.75
+ },
+ "metrics": {
+  "mrr": {
+   "mean": 0.9,
+   "lo": 0.82,
+   "hi": 0.98,
+   "n": 25
+  },
+  "ndcg@10": {
+   "mean": 0.8681662323977355,
+   "lo": 0.7841326809372969,
+   "hi": 0.9432356278865471,
+   "n": 25
+  },
+  "path_complete": {
+   "mean": 0.5555555555555556,
+   "lo": 0.2222222222222222,
+   "hi": 0.7777777777777778,
+   "n": 9
+  },
+  "recall@10": {
+   "mean": 0.94,
+   "lo": 0.86,
+   "hi": 1.0,
+   "n": 25
+  },
+  "recall@5": {
+   "mean": 0.92,
+   "lo": 0.84,
+   "hi": 0.98,
+   "n": 25
+  }
+ },
+ "meta": {
+  "threshold_sweep": {
+   "threshold": 0.9,
+   "balanced": 0.96,
+   "refuse_unanswerable": 1.0,
+   "answer_answerable": 0.92
+  },
+  "judge": "google/gemini-2.5-flash (임시 judge)",
+  "ops": {
+   "latency_p50_s": 0.01,
+   "latency_p95_s": 0.01,
+   "cost_total_usd": 0,
+   "cost_per_item_usd": 0.0,
+   "errors": 0
+  },
+  "n_items": 29
+ },
+ "runs": "1회 실행"
+}

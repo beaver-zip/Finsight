@@ -1,0 +1,71 @@
+{
+ "config": "R",
+ "suite": "report",
+ "split": "dev",
+ "params": {
+  "max_new": 4
+ },
+ "metrics": {
+  "claims_dropped_R2": {
+   "mean": 0.0,
+   "lo": 0.0,
+   "hi": 0.0,
+   "n": 2
+  },
+  "num_coverage": {
+   "mean": 1.0,
+   "lo": 1.0,
+   "hi": 1.0,
+   "n": 2
+  },
+  "num_error": {
+   "mean": 0.25,
+   "lo": 0.0,
+   "hi": 0.5,
+   "n": 2
+  },
+  "num_match": {
+   "mean": 0.75,
+   "lo": 0.5,
+   "hi": 1.0,
+   "n": 2
+  },
+  "support_R1": {
+   "mean": 0.928921568627451,
+   "lo": 0.9166666666666666,
+   "hi": 0.9411764705882353,
+   "n": 2
+  },
+  "support_R2": {
+   "mean": 0.7916666666666667,
+   "lo": 0.7083333333333334,
+   "hi": 0.875,
+   "n": 2
+  },
+  "untraceable_rate_R1": {
+   "mean": 0.0,
+   "lo": 0.0,
+   "hi": 0.0,
+   "n": 2
+  },
+  "verify_fail_rate_R1": {
+   "mean": 0.1801470588235294,
+   "lo": 0.125,
+   "hi": 0.23529411764705882,
+   "n": 2
+  }
+ },
+ "meta": {
+  "judge": "google/gemini-2.5-flash (임시 judge)",
+  "note": "R1=첫 초안(검증 전), R2=검증·재작성 뒤. 수치는 2025 사업연도 주요계정과 대조",
+  "ops": {
+   "latency_p50_s": 84.17500000000001,
+   "latency_p95_s": 88.87,
+   "cost_total_usd": 0.0308,
+   "cost_per_item_usd": 0.01539,
+   "errors": 0
+  },
+  "n_items": 2
+ },
+ "runs": "1회 실행"
+}

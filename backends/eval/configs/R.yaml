@@ -1,0 +1,4 @@
+id: R
+suite: report
+description: "R1(DART 구조화 + 코드 계산, 첫 초안)과 R2(+ 숫자 슬롯·검증 노드, 최종)를 한 실행에서 잰다"
+params: {max_new: 4}

@@ -1,141 +1,61 @@
-// Chatbot.tsx
+// Chatbot.tsx: POST /chat(SSE) 채팅 화면. 같은 창은 같은 thread_id로 대화를 잇고, "새 대화"는 새 thread_id를 받는다.
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { ChevronLeft, Sparkles, RotateCcw } from "lucide-react";
 
 import { ChatForm } from "../components/ChatForm";
 import { Bubble } from "../components/Bubble";
-import { Modal } from "../components/steps/Modal";
-import { PdfViewer } from "../components/PdfViewer";
 import { LoadingSpinner } from "../components/LoadingSpinner";
 import type { Message } from "../ChatContext";
-import type { CollectionFile } from "../hooks/useCollectionFiles";
-import { useCollectionFiles } from "../hooks/useCollectionFiles";
-import { useDynamicQuery } from "../hooks/useDynamicQuery";
-import type { QueryMode } from "../hooks/useDynamicQuery";
-const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
-
-const initialMessages: Message[] = [];
+import { useChatStream } from "../hooks/useChatStream";
+import type { QueryMode } from "../hooks/useChatStream";
 
 // 빈 화면에서 제안하는 예시 질문
 const SAMPLE_QUESTIONS = [
-  "전자금융거래법 시행령상 전자금융업자의 자본금 요건은?",
-  "금융회사가 클라우드컴퓨팅서비스를 이용할 때 지켜야 할 절차는?",
-  "정보보호최고책임자 지정 대상과 주요 업무를 정리해줘",
-  "전자금융사고 배상책임 보험 가입 기준이 궁금해",
+  "정보보호최고책임자를 임원으로 지정해야 하는 회사는?",
+  "전자금융업 등록에 필요한 자본금 기준은?",
+  "삼성전자 최근 분기 실적은 어땠어?",
+  "카카오뱅크 요즘 뉴스 뭐 있어?",
 ];
 
 function Chatbot() {
   const navigate = useNavigate();
 
-  // --- 상태 및 훅 정의 ---
-
-  // 1. 서버에 저장된 파일 목록 관리
-  const { files: fetchedFiles, refetch: refetchCollectionFiles } =
-    useCollectionFiles();
-  const [collectionFiles, setCollectionFiles] = useState<CollectionFile[]>([]);
-
-  // 2. 메시지 및 채팅 관련 상태
-  const [messages, setMessages] = useState<Message[]>(initialMessages);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [typingTextMap, setTypingTextMap] = useState<{
     [id: number]: { answer: string; cites?: any[] };
   }>({});
+  const [queryMode, setQueryMode] = useState<QueryMode>("auto");
+  const [awaitingResume, setAwaitingResume] = useState(false);
+  const { send, isLoading, resetThread } = useChatStream();
 
-  // 3. 동적 API 호출 훅
-  const [queryMode, setQueryMode] = useState<QueryMode>("rag");
-  const {
-    executeQuery,
-    data: queryData,
-    isQueryLoading: isQueryLoading,
-    queryError: queryError,
-  } = useDynamicQuery();
-  const [pendingMessageId, setPendingMessageId] = useState<number | null>(null);
-
-  // 4. UI 및 기타 상태
   const chatEndRef = useRef<null | HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // --- 파일 삭제 핸들러 ---
-  const handleFileDelete = (fileNameToDelete: string) => {
-    setCollectionFiles((currentFiles) =>
-      currentFiles.filter((file) => file.file_name !== fileNameToDelete)
-    );
-  };
-
-  // --- useEffect 훅들 ---
-
-  // useCollectionFiles 훅이 파일 목록을 가져오면 collectionFiles 상태에 반영
-  useEffect(() => {
-    setCollectionFiles(fetchedFiles);
-  }, [fetchedFiles]);
-
-  // API 호출 성공 처리
-  useEffect(() => {
-    if (queryData && pendingMessageId) {
-      setTypingTextMap((prev) => ({
-        ...prev,
-        [pendingMessageId]: {
-          answer: queryData.answer,
-          cites: queryData.retrieved_documents || queryData.search_results,
-        },
-      }));
-      setPendingMessageId(null);
-    }
-  }, [queryData, pendingMessageId]);
-
-  // API 호출 실패 처리
-  useEffect(() => {
-    if (queryError && pendingMessageId) {
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === pendingMessageId
-            ? {
-                ...msg,
-                type: "answer",
-                text: "답변을 가져오는 데 실패했습니다. 백엔드 서버 상태를 확인해주세요.",
-                isStreaming: false,
-              }
-            : msg
-        )
-      );
-      setPendingMessageId(null);
-    }
-  }, [queryError, pendingMessageId]);
-
-  // 타자 치기 효과 적용 (긴 답변은 한 번에 여러 글자씩 흘려 체감 속도를 유지)
+  // 타자 치기 효과(긴 답변은 한 번에 여러 글자씩 흘려 체감 속도를 유지)
   useEffect(() => {
     const entries = Object.entries(typingTextMap);
     if (entries.length === 0) return;
-
     const intervals: ReturnType<typeof setInterval>[] = [];
-
     entries.forEach(([idStr, data]) => {
       const id = Number(idStr);
       const fullText = data.answer ?? "";
-      const cites = data.cites;
       const step = Math.max(2, Math.ceil(fullText.length / 220));
       let charIndex = 0;
-
       const intervalId = setInterval(() => {
         if (charIndex < fullText.length) {
           charIndex = Math.min(charIndex + step, fullText.length);
           const currentText = fullText.slice(0, charIndex);
           setMessages((prev) =>
-            prev.map((msg) =>
-              msg.id === id
-                ? { ...msg, type: "answer", text: currentText }
-                : msg
-            )
+            prev.map((msg) => (msg.id === id ? { ...msg, type: "answer", text: currentText } : msg)),
           );
         } else {
           clearInterval(intervalId);
           setMessages((prev) =>
             prev.map((msg) =>
-              msg.id === id
-                ? { ...msg, isStreaming: false, type: "answer", cites: cites }
-                : msg
-            )
+              msg.id === id ? { ...msg, isStreaming: false, type: "answer", cites: data.cites } : msg,
+            ),
           );
           setTypingTextMap((prev) => {
             const { [id]: _, ...rest } = prev;
@@ -143,19 +63,15 @@ function Chatbot() {
           });
         }
       }, 16);
-
       intervals.push(intervalId);
     });
-
     return () => intervals.forEach(clearInterval);
   }, [typingTextMap]);
 
-  // 자동 스크롤
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Textarea 높이 자동 조절
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
@@ -163,41 +79,73 @@ function Chatbot() {
     }
   }, [inputValue]);
 
-  // --- 핸들러 함수들 ---
+  const setLoadingText = (id: number, detail: string) =>
+    setMessages((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, text: <LoadingSpinner loadingText={detail} /> } : m)),
+    );
+
+  /** 질문(message) 또는 되묻기 답(resume)을 보내고, 진행·되묻기·최종 답을 말풍선에 반영한다. */
+  const run = (shown: string, body: { message?: string; resume?: string }) => {
+    const qid = Date.now();
+    const aid = qid + 1;
+    setMessages((prev) => [
+      ...prev.map((m) => (m.options ? { ...m, options: undefined } : m)),
+      { id: qid, type: "question", text: shown },
+      {
+        id: aid,
+        type: "loading",
+        text: <LoadingSpinner loadingText="질문을 분류하고 있습니다" />,
+        isStreaming: true,
+      },
+    ]);
+    setInputValue("");
+    setAwaitingResume(false);
+
+    send(
+      { ...body, mode: queryMode },
+      {
+        onProgress: (detail) => setLoadingText(aid, detail),
+        onInterrupt: (it) => {
+          setAwaitingResume(true);
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === aid
+                ? { ...m, type: "answer", text: it.question, isStreaming: false, options: it.options }
+                : m,
+            ),
+          );
+        },
+        onFinal: (answer) => {
+          // 출처는 답변 마크다운 끝의 번호 목록(본문 [1]과 같은 번호)에 있으므로 따로 패널을 띄우지 않는다
+          setTypingTextMap((prev) => ({
+            ...prev,
+            [aid]: { answer: answer?.markdown ?? "답변을 만들지 못했습니다.", cites: [] },
+          }));
+        },
+        onError: (message, partial) => {
+          if (partial) return; // 일부 단계 실패는 최종 답에 반영돼 있다
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === aid
+                ? {
+                    ...m,
+                    type: "answer",
+                    isStreaming: false,
+                    text: `답변을 가져오지 못했습니다. 백엔드 서버 상태를 확인해 주세요. (${message})`,
+                  }
+                : m,
+            ),
+          );
+        },
+      },
+    );
+  };
 
   const submitQuestion = (rawText: string) => {
     const text = rawText.trim();
-    if (!text || isQueryLoading) return;
-
-    const newQuestion: Message = {
-      id: Date.now(),
-      type: "question",
-      text,
-    };
-
-    const loadingAnswerId = Date.now() + 1;
-    const loadingAnswer: Message = {
-      id: loadingAnswerId,
-      type: "loading",
-      text: (
-        <LoadingSpinner
-          loadingText={
-            queryMode === "web_search"
-              ? "웹에서 자료를 수집해 분석하고 있습니다"
-              : "관련 법령을 검색해 답변을 작성하고 있습니다"
-          }
-        />
-      ),
-      isStreaming: true,
-    };
-
-    setMessages((prev) => [...prev, newQuestion, loadingAnswer]);
-    setInputValue("");
-    setIsPdfVisible(false);
-    setPendingMessageId(loadingAnswerId);
-
-    // 훅을 사용하여 API 호출 실행
-    executeQuery(text, queryMode);
+    if (!text || isLoading) return;
+    // 되묻기 중이면 입력을 그 답으로 보낸다
+    run(text, awaitingResume ? { resume: text } : { message: text });
   };
 
   const handleSubmit = () => submitQuestion(inputValue);
@@ -205,7 +153,8 @@ function Chatbot() {
   const handleReset = () => {
     setMessages([]);
     setTypingTextMap({});
-    setIsPdfVisible(false);
+    setAwaitingResume(false);
+    resetThread();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -216,97 +165,29 @@ function Chatbot() {
   };
 
   const columnClass = "mx-auto w-full max-w-3xl px-4 sm:px-6";
-
   const hasMessages = messages.length > 0;
 
-  // 모달 관련 상태 및 핸들러
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [currentStep, setCurrentStep] = useState(1);
-  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
-
-  const handleOpenModal = () => {
-    setCurrentStep(1);
-    setIsModalOpen(true);
-  };
-
-  const handleCloseModal = () => {
-    setIsModalOpen(false);
-    refetchCollectionFiles();
-    setTimeout(() => {
-      setCurrentStep(1);
-    }, 300);
-  };
-
-  const handleUploadSuccess = (newFiles: File[]) => {
-    setUploadedFiles(newFiles);
-    setCurrentStep(2);
-  };
-
-  const handleTriggerSuccess = () => {
-    setCurrentStep(3);
-    refetchCollectionFiles();
-  };
-
-  // PDF 뷰어 관련 상태 및 핸들러
-  const [isPdfVisible, setIsPdfVisible] = useState(false);
-  const [pageNum, setPageNum] = useState(1);
-  const [pdfWidth, setPdfWidth] = useState(460);
-  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
-  const [currentPdfFileName, setCurrentPdfFileName] = useState<string | null>(
-    null
+  const form = (
+    <ChatForm
+      inputContainerClass="w-full"
+      textareaRef={textareaRef}
+      inputValue={inputValue}
+      onChange={(e) => setInputValue(e.target.value)}
+      onKeyDown={handleKeyDown}
+      onClick={handleSubmit}
+      handleOpenModal={() => {}}
+      collectionFiles={[]}
+      handleFileDelete={() => {}}
+      hasMessages={hasMessages}
+      isLoading={isLoading}
+      queryMode={queryMode}
+      setQueryMode={setQueryMode}
+      afterSubmitPlaceholder={awaitingResume ? "답을 입력하거나 위에서 고르세요." : undefined}
+    />
   );
 
-  const handleClosePdf = () => setIsPdfVisible(false);
-
-  const handleCiteClick = async (fileName: string, page: number) => {
-    setPageNum(page);
-    setIsPdfVisible(true);
-
-    if (currentPdfFileName === fileName && pdfUrl) {
-      return;
-    }
-
-    try {
-      const response = await fetch(`${BASE_URL}/files/download-pdf/`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ file_name: fileName }),
-      });
-      if (!response.ok) throw new Error("PDF fetch failed");
-
-      const blob = await response.blob();
-      if (pdfUrl) URL.revokeObjectURL(pdfUrl);
-      const url = URL.createObjectURL(blob);
-      setPdfUrl(url);
-      setCurrentPdfFileName(fileName);
-      setIsPdfVisible(true);
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const handleMouseDown = (e: React.MouseEvent) => {
-    const startX = e.clientX;
-    const startWidth = pdfWidth;
-
-    const handleMouseMove = (e: MouseEvent) => {
-      const newWidth = Math.max(280, startWidth + (startX - e.clientX));
-      setPdfWidth(newWidth);
-    };
-
-    const handleMouseUp = () => {
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
-    };
-
-    window.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("mouseup", handleMouseUp);
-  };
-
-  // --- 렌더링 ---
   return (
     <div className="flex h-screen w-full flex-col bg-ink-50 font-sans">
-      {/* 상단 바 */}
       <header className="z-20 shrink-0 border-b border-ink-200 bg-white/90 backdrop-blur">
         <div className="flex items-center justify-between gap-3 px-4 py-2.5 sm:px-6">
           <button
@@ -317,14 +198,7 @@ function Chatbot() {
             <span className="hidden sm:inline">홈으로</span>
           </button>
 
-          <div className="flex items-center gap-2">
-            <span className="text-[14px] font-bold tracking-tight text-ink-900">
-              금융 자문 챗봇
-            </span>
-            <span className="hidden rounded-full border border-ink-200 bg-ink-50 px-2 py-0.5 text-[11.5px] font-medium text-ink-500 sm:inline">
-              전자금융 법령 RAG
-            </span>
-          </div>
+          <span className="text-[14px] font-bold tracking-tight text-ink-900">금융 자문 챗봇</span>
 
           <button
             onClick={handleReset}
@@ -337,84 +211,45 @@ function Chatbot() {
         </div>
       </header>
 
-      {isModalOpen && (
-        <Modal
-          currentStep={currentStep}
-          uploadedFiles={uploadedFiles}
-          onClose={handleCloseModal}
-          onUploadSuccess={handleUploadSuccess}
-          onTriggerSuccess={handleTriggerSuccess}
-        />
-      )}
-
       {hasMessages ? (
-        <div className="flex min-h-0 flex-1 flex-row">
-          {/* 대화 영역 */}
-          <div className="flex min-w-0 flex-1 flex-col">
-            <main className="min-h-0 flex-1 overflow-y-auto py-6">
-              <div className={`${columnClass} flex flex-col gap-6`}>
-                {messages.map((msg) => (
+        <div className="flex min-h-0 flex-1 flex-col">
+          <main className="min-h-0 flex-1 overflow-y-auto py-6">
+            <div className={`${columnClass} flex flex-col gap-6`}>
+              {messages.map((msg) => (
+                <div key={msg.id}>
                   <Bubble
-                    isLoading={isQueryLoading}
-                    onCiteClick={handleCiteClick}
-                    key={msg.id}
+                    isLoading={isLoading}
+                    onCiteClick={() => {}}
                     isQuestion={msg.type === "question"}
                     cites={msg.cites || []}
                     msg={msg}
                   />
-                ))}
-                <div ref={chatEndRef} />
-              </div>
-            </main>
+                  {msg.options && msg.options.length > 0 && (
+                    <div className="ml-10 mt-2 flex flex-wrap gap-2">
+                      {msg.options.map((opt) => (
+                        <button
+                          key={opt}
+                          type="button"
+                          disabled={isLoading}
+                          onClick={() => run(opt, { resume: opt })}
+                          className="rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-[13px] font-medium text-ink-700 shadow-card transition-colors hover:border-brand-300 hover:text-brand-700 disabled:opacity-50"
+                        >
+                          {opt}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+              <div ref={chatEndRef} />
+            </div>
+          </main>
 
-            <footer className="shrink-0 border-t border-ink-200 bg-white/90 py-3 backdrop-blur">
-              <div className={columnClass}>
-                <ChatForm
-                  inputContainerClass="w-full"
-                  textareaRef={textareaRef}
-                  inputValue={inputValue}
-                  onChange={(e) => setInputValue(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  onClick={handleSubmit}
-                  handleOpenModal={handleOpenModal}
-                  collectionFiles={collectionFiles}
-                  handleFileDelete={handleFileDelete}
-                  hasMessages={hasMessages}
-                  isLoading={isQueryLoading}
-                  queryMode={queryMode}
-                  setQueryMode={setQueryMode}
-                />
-              </div>
-            </footer>
-          </div>
-
-          {/* 원문 PDF 뷰어 */}
-          {isPdfVisible && (
-            <>
-              <div
-                className="w-1 shrink-0 cursor-col-resize bg-ink-200 transition-colors hover:bg-brand-400"
-                onMouseDown={handleMouseDown}
-              />
-              <aside
-                style={{ width: pdfWidth }}
-                className="shrink-0 overflow-y-auto border-l border-ink-200 bg-white p-3"
-              >
-                {pdfUrl ? (
-                  <PdfViewer
-                    fileURL={pdfUrl}
-                    initialPage={pageNum}
-                    onPageChange={setPageNum}
-                    onClose={handleClosePdf}
-                  />
-                ) : (
-                  <LoadingSpinner loadingText="PDF를 불러오는 중입니다…" block />
-                )}
-              </aside>
-            </>
-          )}
+          <footer className="shrink-0 border-t border-ink-200 bg-white/90 py-3 backdrop-blur">
+            <div className={columnClass}>{form}</div>
+          </footer>
         </div>
       ) : (
-        /* 빈 상태 */
         <main className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto py-8">
           <div className={`${columnClass} w-full`}>
             <div className="mb-8 text-center">
@@ -425,26 +260,11 @@ function Chatbot() {
                 무엇을 확인해 드릴까요?
               </h1>
               <p className="text-[14.5px] text-ink-500">
-                전자금융거래법 · 감독규정 · 시행세칙을 벡터 검색해 근거 조항과
-                함께 답변합니다.
+                전자금융 법령은 조문을 인용해, 상장사는 공시·시세·기사를 근거로 답합니다.
               </p>
             </div>
 
-            <ChatForm
-              inputContainerClass="w-full"
-              textareaRef={textareaRef}
-              inputValue={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              onKeyDown={handleKeyDown}
-              onClick={handleSubmit}
-              handleOpenModal={handleOpenModal}
-              collectionFiles={collectionFiles}
-              handleFileDelete={handleFileDelete}
-              hasMessages={hasMessages}
-              isLoading={isQueryLoading}
-              queryMode={queryMode}
-              setQueryMode={setQueryMode}
-            />
+            {form}
 
             <div className="mt-6">
               <p className="mb-2.5 text-[11.5px] font-semibold uppercase tracking-wider text-ink-400">

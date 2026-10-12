@@ -1,0 +1,4 @@
+id: L1
+suite: legal
+description: "API 코퍼스 + 부모-자식 청킹 + kagome_kr 하이브리드(리랭크 없음), α=0.5"
+params: {stage: L1, alpha: 0.5}
