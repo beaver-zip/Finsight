@@ -24,7 +24,7 @@ from eval.suites.news import score_picks
 
 
 def _cand(d: dict) -> Candidate:
-    d = dict(d)
+    d = {"body": None, **d}
     d["published_at"] = datetime.fromisoformat(d["published_at"]) if d.get("published_at") else None
     fields = Candidate.__dataclass_fields__
     return Candidate(**{k: v for k, v in d.items() if k in fields})
