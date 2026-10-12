@@ -13,7 +13,7 @@ import logging
 from statistics import median
 
 from app.core.llm import EFFORT_OVERRIDE, ROLE_OVERRIDE
-from eval.common import Config, dataset, init_paid_apis, new_run_dir, save_jsonl, write_summary
+from eval.common import RESULTS, Config, dataset, init_paid_apis, load_jsonl, new_run_dir, save_jsonl, write_summary
 from eval.stats import ci
 
 SUITES = {"legal": "legal_qa", "routing": "routing", "news": "news_companies", "report": "report_companies",
@@ -36,6 +36,11 @@ async def main(args) -> None:
     cfg = Config.load(args.config)
     split = args.split or cfg.params.get("split", "dev")
     items = dataset(cfg.params.get("dataset", SUITES[cfg.suite]), split)
+    if args.skip_done or cfg.params.get("skip_done"):
+        # 앞선 실행에서 오류 없이 끝난 문항은 건너뛴다(OpenDART 요청을 며칠에 나눠 쓰는 리포트·복합 과업용)
+        done = {r["id"] for d in (RESULTS / cfg.id).glob("*/items.jsonl") for r in load_jsonl(d) if not r.get("error")} \
+            if (RESULTS / cfg.id).exists() else set()
+        items = [x for x in items if x["id"] not in done]
     limit = args.limit or cfg.params.get("limit")
     if limit:
         items = items[:limit]
@@ -62,4 +67,5 @@ if __name__ == "__main__":
     ap.add_argument("--config", required=True)
     ap.add_argument("--split")
     ap.add_argument("--limit", type=int)
+    ap.add_argument("--skip-done", action="store_true", help="앞선 실행에서 끝난 문항은 건너뛴다")
     asyncio.run(main(ap.parse_args()))

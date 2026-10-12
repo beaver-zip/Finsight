@@ -1,0 +1,5 @@
+# v1 해커톤(2025-09) 팀 커밋에 남은 과거 기록. 원본 레포(Kimyongari/Finsight)에도 같은 기록이 있어 fork에서 지워도 남는다.
+# 지금 파일에는 없다. 새로 들어오는 키만 잡도록 이 세 건만 건너뛴다.
+2a60b00d10b80dea7b11016b10970c6791d1b657:backends/test_web_agent.py:generic-api-key:31
+2a60b00d10b80dea7b11016b10970c6791d1b657:backends/저장본/test_web_agent.py:generic-api-key:31
+5a124a3b092830e435c622a88e3a91faf3e562e6:backends/app/core/Preprocessor/preprocessor.py:generic-api-key:32
