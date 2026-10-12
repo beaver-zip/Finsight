@@ -746,7 +746,7 @@ class OrchestratorState(TypedDict):
  "answerable": true, "as_of": "2025-02-05", "source": "llm_draft+human"}
 ```
 
-만든 초안(2026-10-12): `legal_qa` 100(단일 30, 다중 홉 30, 별표 15, 수치 10, 답 없음 15. 별표는 제목의 "관련 조문" 또는 별표를 참조하는 조문과 짝지었다), `routing` 100, `composite_tasks` 10, `multiturn` 10대화(46턴), `report_companies` 16(대형주 한화오션·기아, 코스닥 진로발효·중앙에너비스, 지주사 한국앤컴퍼니·코스맥스비티아이, 금융사 키움증권·카카오페이, 12월 외 결산 현대약품·기신정기, 정정 공시 디씨엠·시알홀딩스, 연결 없는 회사 경보제약·우양피앤엘, 적자 기업 코오롱글로벌·OCI), `news_labels` 168건(8개 기업, 현대약품 3건·시알홀딩스 1건처럼 기사가 적은 회사가 있다), `report_gold` 80항목. dev/test는 legal_qa 29/71, routing 30/70, report 8/8, 뉴스 기업 2/6이다.
+만든 초안(2026-10-12): `legal_qa` 100(단일 30, 다중 홉 30, 별표 15, 수치 10, 답 없음 15. 별표는 제목의 "관련 조문" 또는 별표를 참조하는 조문과 짝지었다), `routing` 100, `composite_tasks` 10, `multiturn` 10대화(46턴), `report_companies` 16(대형주 한화오션·기아, 코스닥 진로발효·중앙에너비스, 지주사 한국앤컴퍼니·코스맥스비티아이, 금융사 키움증권·카카오페이, 12월 외 결산 현대약품·기신정기, 정정 공시 디씨엠·시알홀딩스, 연결 없는 회사 경보제약·우양피앤엘, 적자 기업 코오롱글로벌·OCI), `news_labels` 174건(8개 기업, 현대약품 3건·시알홀딩스 1건처럼 기사가 적은 회사가 있다), `report_gold` 80항목. dev/test는 legal_qa 29/71, routing 30/70, report 8/8, 뉴스 기업 2/6이다.
 
 리포트 정답(`report_gold.v1.jsonl`)은 `{corp_code, rcept_no, metric, period, value, verified_by}`이고 v2 코드와 독립적으로 만든다. 2025 사업연도 주요계정(`fnlttSinglAcnt`)의 매출액·영업이익·당기순이익·자본총계·자산총계를 그대로 정답으로 쓴다(사람 검수 없음, 2026-10-12 결정). 리포트 연간 표의 매출액·영업이익과 대조하고, 순이익은 정답이 비지배 포함 당기순이익이라 별도 재무제표 회사에서만 비교한다. 자본·자산은 리포트 표에 없어 커버리지에서 빠진다. 리포트 v2는 분석 절의 분기 값(사실표 id `rev.2Q26`, `fcf.H126` 등)을 쓰므로, 정답의 (지표, 기간)을 사실표 id에 맞춘 대응표가 필요하다.
 
@@ -792,8 +792,8 @@ class OrchestratorState(TypedDict):
 ### 러너와 CI
 
 ```bash
-python -m eval.run --suite legal --config eval/configs/L4.yaml
-python -m eval.compare eval/results/L3/<ts> eval/results/L4/<ts>   # 쌍 비교표 + 신뢰구간
+PYTHONPATH=. python -m eval.run --config L4 --split dev     # eval/configs/L4.yaml
+PYTHONPATH=. python -m eval.compare eval/results/L3b/<ts> eval/results/L4/<ts>   # 쌍 비교표 + 신뢰구간
 ```
 
 - CI는 단위 테스트만 돌린다. 스모크 평가는 두지 않는다(2026-10-12 결정).
@@ -808,10 +808,15 @@ python -m eval.compare eval/results/L3/<ts> eval/results/L4/<ts>   # 쌍 비교�
 | `test_budget.py` | 5 | Haiku 요금 구간, Tavily 무료 크레딧 우선, 예산·검색 크레딧 차단, 캐시 만료 |
 | `test_dates.py` | 3 | RFC 2822 → KST, 상대·점 표기 날짜, 파싱 실패 |
 | `test_domain_finance.py` | 9 | 계정명 정규화·이름 매칭, 지표 부호 규칙·연환산·자본잠식·`None` 전파, 금융 세트 판정, 슬롯 렌더링, 추적 불가 숫자 |
-| `test_news_rank.py` | 4 | 중복 묶기 임계값·대표 기사, MMR 측면 상한, 공시 일치·커버리지, 출처 등급 |
-| `test_report_v2.py` | 29 | 합성 자료로 핵심 사실·차트, 부문 분기 값, 발표 반응·상대 수익률, 잠정실적 증감률·컨센서스, 슬롯·각주·눈금 렌더링, 조사·방향어 다듬기, 기간 표기 허용, 초안 개수·id 검사, 문체 검사, 실패 블록 처리, 컨센서스 검증, OpenDART 장애 시 지난 응답 |
+| `test_news_rank.py` | 5 | 중복 묶기 임계값·대표 기사, MMR 측면 상한, 공시 일치·커버리지, 출처 등급, 검색 0건 처리 |
+| `test_report_v2.py` | 32 | 합성 자료로 핵심 사실·차트, 부문 분기 값, 발표 반응·상대 수익률, 잠정실적 증감률·컨센서스, 슬롯·각주·눈금 렌더링, 조사·방향어 다듬기, 기간 표기 허용, 초안 개수·id 검사, 문체 검사, 실패 블록 처리, 컨센서스 검증, OpenDART 장애 시 지난 응답 |
+| `test_report_v2.py`(추가분) | — | 별도 재무제표 라벨, 금융업 주주환원 절, 음수 영업현금흐름 |
+| `test_law_parse.py` | 21 | 법령·행정규칙 XML 파싱, 별표·관련 조문, 개정 이력 표시 제거, 참조 해석기(접두어·같은 법·범위·접속어), 위임 문구, 코퍼스 참조가 모두 실제 조문으로 풀리는지 |
+| `test_legal_answer.py` | 4 | 인용 블록 → 항 번호, 원문 조각 처리(빼기·따옴표), 마크다운 렌더링·거절문, 약칭 정규화·분기 |
+| `test_orchestrator.py` | 9 | 법령 단독 경로, 기업 되묻기·재개, 안내, 검증 실패 → 재작성 → 표시, 턴마다 결과 비우기, 모드 고정, 의도 바로잡기, 출처에 공시 |
+| `test_eval.py` | 8 | 부트스트랩·짝 차이·McNemar·κ, 검색 지표, 거절 임계값 탐색, macro-F1, 뉴스·리포트 수치 지표, 분할 |
 
-설계에만 있는 테스트: 참조 해석기(라벨한 참조 표현 100개), `core/*` 녹화 응답과 상태 코드 013·020·800, 그래프 상태 전이와 루프 종료 조건, docker compose(Weaviate, Neo4j) 적재→검색 왕복.
+설계에만 있는 테스트: 참조 해석기 정확도(사람이 검수한 표현 100개, `eval/score_citations.py`), `core/*` 상태 코드 013·020·800 응답, docker compose(Weaviate, Neo4j) 적재→검색 왕복.
 
 ## API 계약
 
