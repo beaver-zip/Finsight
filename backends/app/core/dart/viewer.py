@@ -8,6 +8,7 @@ import asyncio
 import html as htmllib
 import logging
 import re
+import time
 from dataclasses import dataclass
 
 import httpx
@@ -50,11 +51,56 @@ def to_cells(page: str) -> list[str]:
     return [t for t in toks if t]
 
 
+def grid(tbl) -> list[list[str]]:
+    """lxml 표 요소 → rowspan·colspan을 펼친 셀 글자 격자(원문 XML의 TE·TU 칸 포함)."""
+    out, carry = [], {}
+    for r, tr in enumerate(tbl.xpath(".//tr")):
+        row, c, cells, ci = [], 0, tr.xpath("./td|./th|./te|./tu"), 0
+        while ci < len(cells) or (r, c) in carry:
+            if (r, c) in carry:
+                row.append(carry.pop((r, c)))
+                c += 1
+                continue
+            td = cells[ci]
+            ci += 1
+            t = re.sub(r"\s+", " ", td.text_content()).strip()
+            try:
+                cs, rs = max(1, int(td.get("colspan") or 1)), max(1, int(td.get("rowspan") or 1))
+            except ValueError:
+                cs, rs = 1, 1
+            for k in range(cs):
+                row.append(t)
+                for rr in range(1, rs):
+                    carry[(r + rr, c + k)] = t
+            c += cs
+        out.append(row)
+    return out
+
+
+# 요청을 몰아 보내면 DART 웹이 한동안 연결을 끊는다(2026-10-13 두 번). 한 번에 하나씩, 간격을 두고 보낸다.
+GAP = 0.6
+_locks: dict[int, asyncio.Lock] = {}
+_last = 0.0
+
+
+async def _paced_get(http: httpx.AsyncClient, url: str) -> httpx.Response:
+    global _last
+    lock = _locks.setdefault(id(asyncio.get_running_loop()), asyncio.Lock())
+    async with lock:
+        wait = _last + GAP - time.monotonic()
+        if wait > 0:
+            await asyncio.sleep(wait)
+        try:
+            return await http.get(url, headers={"User-Agent": "Mozilla/5.0 Finsight"}, timeout=30)
+        finally:
+            _last = time.monotonic()
+
+
 async def _get(http: httpx.AsyncClient, url: str) -> bytes:
     last: Exception | None = None
     for i in range(3):
         try:
-            r = await http.get(url, headers={"User-Agent": "Mozilla/5.0 Finsight"}, timeout=30)
+            r = await _paced_get(http, url)
             r.raise_for_status()
             if len(r.content) > 200:
                 return r.content

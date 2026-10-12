@@ -62,6 +62,7 @@ class Inputs:
     news: list[NewsItem]
     disclosures: list[Disclosure]
     industry: str = "general"
+    segment_source: str = "정기보고서 사업부문별 요약 재무 현황(내부거래 포함)"
 
 
 def make_inputs(corp: CorpProfile, today: date, filing: PeriodicFiling, col: Any, *, consensus: Consensus | None = None,
@@ -71,7 +72,8 @@ def make_inputs(corp: CorpProfile, today: date, filing: PeriodicFiling, col: Any
                   shares=col.shares, splits=col.splits, dividends=col.dividends, buybacks=col.buybacks, px=col.px,
                   index_px=col.index_px, index_name=col.index_name, pref_px=col.pref_px,
                   prelim_firsts=col.prelim_firsts, segments=col.segments, peers=col.peers, consensus=consensus,
-                  news=list(news or []), disclosures=list(disclosures or []), industry=col.industry)
+                  news=list(news or []), disclosures=list(disclosures or []), industry=col.industry,
+                  segment_source=col.segment_source or Inputs.segment_source)
 
 
 @dataclass
@@ -631,7 +633,7 @@ def _segments(c: dict) -> None:
     yago = qkey(int("20" + last[2:4]) - 1, int(last[0]))
     lk = per_label(last)
     F.add("seg1_op", last, f"{short(main)} 부문 영업이익({last})", fmt.money(seg_last[main]["op"]), seg_last[main]["op"], "KRW",
-          source="정기보고서 사업부문별 요약 재무 현황(내부거래 포함)")
+          source=inp.segment_source)
     if share is not None:
         F.add("seg1_share", last, f"{short(main)} 부문 영업이익 ÷ 전사 영업이익({last})", fmt.pct(share), share, "%")
     if seg_last[main]["rev"]:
@@ -675,8 +677,9 @@ def _segments(c: dict) -> None:
         qk = t["heads"]
         div = data.table_div
         segrow = lambda n, k: [fmt.tbl(segq[q][n][k], div) if q in segq else "–" for q in qk]
-        rev_sub = [{"head": short(n), "cells": segrow(n, "rev"), "sub": True, "tip": "부문 간 내부거래 포함"} for n in (main, second)]
-        op_sub = [{"head": short(n), "cells": segrow(n, "op"), "sub": True, "tip": "부문 간 내부거래 포함"} for n in [main, second] + others]
+        tip = "부문 간 내부거래 포함" if "내부거래 포함" in inp.segment_source else "연결재무제표 주석 영업부문 정보 기준"
+        rev_sub = [{"head": short(n), "cells": segrow(n, "rev"), "sub": True, "tip": tip} for n in (main, second)]
+        op_sub = [{"head": short(n), "cells": segrow(n, "op"), "sub": True, "tip": tip} for n in [main, second] + others]
         t["rows"] = [t["rows"][0]] + rev_sub + [t["rows"][1]] + op_sub + t["rows"][2:]
     c["segq"] = segq
 
