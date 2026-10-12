@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import logging
 from typing import Any, Callable, Literal, TypeVar
 
@@ -30,6 +31,16 @@ CLAUDE_TIMEOUT_S = 120.0
 
 _client: AsyncAnthropic | None = None
 _sem = asyncio.Semaphore(CLAUDE_CONCURRENCY)
+# 평가 전용: 작업(task) 이름 → effort 덮어쓰기(작업별 effort 탐색). 운영 경로에서는 비어 있다
+EFFORT_OVERRIDE: contextvars.ContextVar[dict[str, str]] = contextvars.ContextVar("effort_override", default={})
+
+
+# 평가 전용: 작업 이름 → 역할 덮어쓰기("strong"이면 LLM_MODEL_STRONG). 생성 모델 비교(법령 답변 Haiku vs Sonnet)에 쓴다
+ROLE_OVERRIDE: contextvars.ContextVar[dict[str, str]] = contextvars.ContextVar("role_override", default={})
+
+
+def _effort(task: str, effort: Effort) -> Effort:
+    return EFFORT_OVERRIDE.get().get(task, effort)  # type: ignore[return-value]
 
 try:  # LangSmith 트레이스에 SDK 직접 호출을 넣는다
     from langsmith import traceable
@@ -87,6 +98,8 @@ async def structured(schema: type[T], messages: list[dict], *, role: Role = "def
                      validate: Callable[[T], str | None] | None = None, thinking: bool = True) -> T:
     """구조화 출력. 스키마 위반·개수 검사 실패·refusal → 같은 설정으로 1회, max_tokens 중단 →
     max_tokens를 2배로 1회 다시 요청 → 그래도 실패하면 StructuredOutputError."""
+    effort = _effort(task, effort)
+    role = ROLE_OVERRIDE.get().get(task, role)  # type: ignore[assignment]
     assert messages and messages[-1]["role"] == "user", "메시지는 user 턴으로 끝나야 한다(프리필 금지)"
     model = model_for(role)
     max_tokens = max_tokens or MAX_TOKENS[effort]
@@ -150,6 +163,8 @@ async def cited(question: str, docs: list[dict], *, role: Role = "default",
                 max_tokens: int = 16_000, task: str = "cited") -> Message:
     """search_result 블록 + citations. output_config.format은 함께 보내지 않는다.
     docs는 key 순으로 정렬된 search_result 블록이고, 마지막 블록에만 cache_control을 건다."""
+    effort = _effort(task, effort)
+    role = ROLE_OVERRIDE.get().get(task, role)  # type: ignore[assignment]
     model = model_for(role)
     blocks = [dict(d) for d in docs]
     if blocks:
@@ -179,6 +194,8 @@ async def text(messages: list[dict], *, role: Role = "default", effort: Effort =
                system: str | list[dict] | None = None, max_tokens: int | None = None,
                task: str = "text") -> str:
     """구조 없이 텍스트만 받는 호출(대화 요약 등)."""
+    effort = _effort(task, effort)
+    role = ROLE_OVERRIDE.get().get(task, role)  # type: ignore[assignment]
     assert messages and messages[-1]["role"] == "user"
     model = model_for(role)
     s = get_settings()

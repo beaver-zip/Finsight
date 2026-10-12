@@ -20,7 +20,7 @@ from app.core.dart import corp as dart_corp
 from app.core.dart import filings as dart_filings
 from app.core.dart.client import DartClient
 from app.domain.models import ASPECTS
-from eval.common import DATASETS, assign_splits, load_jsonl, save_jsonl
+from eval.common import DATASETS, assign_splits, init_paid_apis, load_jsonl, save_jsonl
 
 log = logging.getLogger("news_labels")
 
@@ -65,9 +65,11 @@ async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     for n in ("httpx", "httpcore"):
         logging.getLogger(n).setLevel(logging.WARNING)
+    await init_paid_apis()
     companies = load_jsonl(DATASETS / "news_companies.v1.jsonl")
     # 뉴스 평가의 dev/test는 기업 단위로 다시 나눈다(8개 중 약 2개가 dev)
     split = {c["corp_code"]: c["split"] for c in assign_splits([dict(c) for c in companies], strata=lambda x: "all")}
+    save_jsonl(DATASETS / "news_companies.v1.jsonl", [{**c, "split": split[c["corp_code"]]} for c in companies])
     path = DATASETS / "news_labels.v1.jsonl"
     rows = load_jsonl(path) if path.exists() else []          # 실행을 거듭하며 후보를 URL 기준으로 합친다(pooling)
     seen = {(r["corp_code"], r["url"]) for r in rows}

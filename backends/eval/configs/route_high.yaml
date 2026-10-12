@@ -1,0 +1,5 @@
+id: route_high
+suite: routing
+description: "라우팅 effort 탐색: high"
+compare_to: route
+params: {effort_override: {chat.route: high}}

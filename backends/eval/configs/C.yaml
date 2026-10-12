@@ -1,0 +1,4 @@
+id: C
+suite: agent
+description: "복합 과업(기업+법령 5, 기업+뉴스 5) 체크리스트"
+params: {split: test}

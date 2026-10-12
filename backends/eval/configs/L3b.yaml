@@ -1,0 +1,5 @@
+id: L3b
+suite: legal
+description: "L2 + 인용 그래프 2홉, 답변 포함"
+compare_to: L2
+params: {stage: L3b, alpha: 0.5, answer: true}

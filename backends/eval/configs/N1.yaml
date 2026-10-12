@@ -1,0 +1,4 @@
+id: N1
+suite: news
+description: "질의 계획 + 임베딩 중복 묶기 + 점수·MMR(커버리지 재검색 없음)"
+params: {coverage_retry: false}
