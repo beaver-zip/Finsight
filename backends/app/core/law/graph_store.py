@@ -90,19 +90,27 @@ class LawGraph:
 
     # ---------- 검색
     async def expand(self, seed_keys: list[str], hops: int = 1, limit: int = 50) -> list[Expanded]:
-        """시드에서 참조·위임 엣지(방향 무관)를 hops까지 따라간 조문·별표. 법령 노드는 지나가지 않는다."""
+        """시드에서 참조·위임 엣지(방향 무관)를 hops까지 따라간 조문·별표. 법령 노드는 지나가지 않는다.
+
+        seed_keys는 점수 순이다. 후보는 (홉 수, 출발 시드의 순위) 순으로 정렬한 뒤 limit개를 자른다. 홉 수로만 자르면
+        같은 홉 안의 순서가 임의라, 상위 시드가 직접 참조한 조문이 잘려 나갔다(2026-10-12 평가에서 관찰)."""
         if not seed_keys:
             return []
         h = 2 if hops >= 2 else 1           # 가변 길이 상한은 파라미터로 줄 수 없어 문자열로 넣는다(1 또는 2만)
         q = (f"MATCH (s) WHERE (s:Article OR s:Annex) AND s.key IN $seeds "
              f"MATCH p = (s)-[:REFERS_TO|DELEGATES_TO*1..{h}]-(n) "
              "WHERE (n:Article OR n:Annex) AND NOT n.key IN $seeds AND none(x IN nodes(p) WHERE x:Law) "
-             "WITH n, p ORDER BY length(p) "
-             "WITH n, collect(p)[0] AS shortest "
-             "RETURN n.key AS key, length(shortest) AS hops, [x IN nodes(shortest) | x.key] AS path "
-             "ORDER BY hops LIMIT $limit")
-        rows = await self._run(q, seeds=seed_keys, limit=limit)
-        return [Expanded(r["key"], r["hops"], r["path"]) for r in rows]
+             "WITH n, length(p) AS len, [x IN nodes(p) | x.key] AS path "
+             "WITH n, min(len) AS hops, collect({len: len, path: path}) AS ps "
+             "RETURN n.key AS key, hops, [q IN ps WHERE q.len = hops | q.path] AS paths LIMIT 1000")
+        rows = await self._run(q, seeds=seed_keys)
+        rank = {k: i for i, k in enumerate(seed_keys)}
+        out = []
+        for r in rows:
+            best = min(r["paths"], key=lambda pth: rank.get(pth[0], len(rank)))
+            out.append((r["hops"], rank.get(best[0], len(rank)), Expanded(r["key"], r["hops"], best)))
+        out.sort(key=lambda x: (x[0], x[1]))
+        return [e for _, _, e in out[:limit]]
 
     async def outside_laws(self, keys: list[str]) -> list[str]:
         """이 조문들이 참조했지만 코퍼스에 없는 법령 이름."""

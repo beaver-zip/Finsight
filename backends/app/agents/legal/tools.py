@@ -40,6 +40,33 @@ def short_name(key: str) -> str:
     return f"{pre} 제{n[0]}조" + (f"의{n[1]}" if len(n) > 1 else "")
 
 
+def _bigrams(t: str) -> set[str]:
+    t = re.sub(r"\s+", "", t)
+    return {t[i:i + 2] for i in range(len(t) - 1)}
+
+
+def focus_text(doc: Article | Annex, query: str, max_chars: int = 1500) -> str:
+    """리랭크 입력: 긴 조문은 질문과 글자 2-gram이 많이 겹치는 항부터 넣는다(리랭커는 앞 512토큰만 본다).
+    정의 조항(법 제2조)처럼 긴 조문이 앞부분만 보고 낮은 점수를 받던 문제를 줄인다."""
+    full = doc_text(doc)
+    if len(full) <= max_chars or isinstance(doc, Annex):
+        return full[:max_chars]
+    q = _bigrams(query)
+    paras = sorted(doc.paragraphs, key=lambda p: -len(q & _bigrams(p.text)))
+    out = heading_of(doc)
+    for p in paras:
+        if len(out) + len(p.text) + 1 > max_chars:
+            # 항이 길면(호가 많은 정의 조항) 질문과 겹치는 줄만 남긴다
+            lines = sorted(p.text.split("\n"), key=lambda ln: -len(q & _bigrams(ln)))
+            for ln in lines:
+                if len(out) + len(ln) + 1 > max_chars:
+                    break
+                out += "\n" + ln
+            break
+        out += "\n" + p.text
+    return out
+
+
 def doc_text(doc: Article | Annex) -> str:
     if isinstance(doc, Annex):
         return f"[{doc.law_name}] {doc.title}\n{doc.text}"
@@ -90,7 +117,8 @@ class LawTools:
         cands = await self.graph.expand(keys, hops=hops, limit=limit)
         docs = [(c, self.corpus.get(c.key)) for c in cands]
         docs = [(c, d) for c, d in docs if d is not None]
-        scores = await rerank(normalize(query), [doc_text(d) for _, d in docs])
+        q = normalize(query)
+        scores = await rerank(q, [focus_text(d, q) for _, d in docs])
         out = [ArticleHit(article=d, score=s - lam * c.hops, hops=c.hops, path=c.path)
                for (c, d), s in zip(docs, scores)]
         return sorted(out, key=lambda h: -h.score)
