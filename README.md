@@ -15,14 +15,15 @@
 
 ## 실행
 
-처음 설치는 [docs/LOCAL_SETUP.md](docs/LOCAL_SETUP.md)를 따릅니다. API 키는 `backends/.env`에 둡니다.
+필요한 것: Python 3.11~3.13, Node.js 20 이상, Docker.
 
 ```bash
-docker compose up -d weaviate neo4j                 # DB
+cp backends/.env.copy backends/.env                 # 키 입력: Anthropic, OpenRouter, OpenDART, Tavily, 법령 API
+bash scripts/setup_local.sh                         # 가상환경·의존성 설치, Weaviate·Neo4j 실행, 테스트, 키 확인
 cd backends && source .venv/bin/activate
 PYTHONPATH=. python scripts/ingest_law.py           # 법령 적재(처음 한 번)
 uvicorn app.main:app --port 8000                    # 백엔드
-cd ../frontends/corp-advisor--app && npm run dev    # 프론트: http://localhost:5173
+cd ../frontends/corp-advisor--app && npm install && npm run dev   # 프론트: http://localhost:5173
 ```
 
 ## 동작 방식
@@ -65,7 +66,7 @@ frontends/corp-advisor--app/    리포트 화면, 채팅 화면
 | 범위 밖 질문 거절 | 4문항 모두 거절 |
 | 리포트 숫자 | 공시 원본과 일치율 1.0(2개 기업) |
 
-전체 결과는 [docs/eval_results.md](docs/eval_results.md), 설계와 결정 기록은 [docs/design.md](docs/design.md)에 있습니다.
+전체 결과는 [docs/eval_results.md](docs/eval_results.md)에 있습니다.
 
 ```bash
 cd backends && PYTHONPATH=. python -m eval.run --config L4 --split dev
