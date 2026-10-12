@@ -54,7 +54,8 @@ def test_names_and_routing():
     cfg = {"configurable": {"legal_config": LegalConfig(max_loops=2)}}
     assert after_judge({"missing": [], "loops": 0}, cfg) == "answer"
     assert after_judge({"missing": ["x"], "loops": 2}, cfg) == "retrieve"
-    assert after_judge({"missing": ["x"], "loops": 3}, cfg) == "refuse"
+    assert after_judge({"missing": ["x"], "loops": 3}, cfg) == "answer"      # 재검색 뒤에도 부족하면 찾은 조문으로 답한다
+    assert after_judge({"missing": [], "low_score": True}, cfg) == "refuse"
 
 
 def test_mid_sentence_quote_is_wrapped_not_dropped():
