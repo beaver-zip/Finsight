@@ -23,6 +23,7 @@ SYSTEM = """너는 전자금융 법령을 조사해 답하는 법무 리서처�
 - 조문에 없는 내용, 조문 밖의 일반론, 실무 조언을 쓰지 않는다. 조문으로 답할 수 없는 쟁점은 "제공된 조문에서 확인되지 않는다"고 쓴다.
 - 법령명은 정식 명칭으로 쓴다(예: 전자금융거래법 시행령 제11조의4제4항).
 - 조문 문구를 길게 그대로 옮겨 적지 말고 요지를 너의 문장으로 쓴다.
+- "~구조입니다", "~구간", "~셈", "~가능성이 있습니다" 같은 해석용 맺음말과 "시사합니다", "의미합니다"를 쓰지 않는다. 조문이 정한 사실만 쓴다.
 - 존댓말(~습니다)로 쓴다. 머리말, 소제목, 목록 기호, 맺음말을 쓰지 않는다."""
 
 log = logging.getLogger(__name__)
@@ -146,6 +147,10 @@ async def build_answer(question: str, context: list[ArticleHit], tools: LawTools
 
 # ---------------- 렌더링
 def link_of(key: str, corpus) -> str:
+    """law.go.kr 조문 주소. 사용자가 올린 내규는 공개 주소가 없어 빈 문자열."""
+    d0 = corpus.get(key)
+    if d0 is not None and getattr(d0, "source", "lawgo") == "upload":
+        return ""
     law = key.split(":")[0]
     d = next((x for x in corpus.docs if x["key_name"] == law), None)
     name = d["name"] if d else law
@@ -167,7 +172,8 @@ def render_markdown(ans: LegalAnswer, corpus) -> str:
                  "이 질문에 답할 조문을 찾지 못했습니다. 관련도가 가장 높은 조문은 아래와 같습니다.", ""]
         for k in ans.fallback:
             d = corpus.get(k)
-            lines.append(f"- [{_title(d) if d else k}]({link_of(k, corpus)})")
+            url = link_of(k, corpus)
+            lines.append(f"- [{_title(d) if d else k}]({url})" if url else f"- {_title(d) if d else k}")
         return "\n".join(lines)
     refs: list[str] = []
     for p in ans.points:
@@ -192,7 +198,8 @@ def render_markdown(ans: LegalAnswer, corpus) -> str:
         src = next(c.source for p in ans.points for c in p.citations if cite_label(c) == lab)
         d = corpus.get(src)
         title = f" {d.title}" if d is not None and getattr(d, "title", "") else ""
-        out.append(f"{i}. [{lab}{title}]({link_of(src, corpus)})")
+        url = link_of(src, corpus)
+        out.append(f"{i}. [{lab}{title}]({url})" if url else f"{i}. {lab}{title}(내규)")
     if ans.notes:
         out += [""] + [f"※ {n}" for n in ans.notes]
     return "\n".join(out).strip()

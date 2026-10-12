@@ -111,8 +111,15 @@ class LawVectors:
                 for c, v in zip(chunks, vecs)]
         res = await col.data.insert_many(objs)
         if res.has_errors:
-            raise RuntimeError(f"Weaviate 적재 오류 {len(res.errors)}건: {list(res.errors.values())[:1]}")
+            first = next(iter(res.errors.values()))
+            raise RuntimeError(f"Weaviate 적재 오류 {len(res.errors)}건: {first.message[:300]}")   # 벡터는 찍지 않는다
         return len(objs)
+
+    async def delete_doc(self, law_name: str, source: str = "upload") -> None:
+        """올린 문서 하나의 청크만 지운다(법령 코퍼스는 source가 달라 지워지지 않는다)."""
+        col = self.client.collections.get(COLLECTION)
+        await col.data.delete_many(where=Filter.by_property("source").equal(source)
+                                   & Filter.by_property("law_name").equal(law_name))
 
     async def delete_source(self, source: str) -> None:
         col = self.client.collections.get(COLLECTION)

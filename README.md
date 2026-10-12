@@ -52,6 +52,9 @@ frontends/corp-advisor--app/    리포트 화면, 채팅 화면
 | --- | --- |
 | `GET /report/{corp_code}` | 기업 분석 리포트(HTML). `/stream`은 진행 상황을 실시간으로, `/json`은 데이터로 |
 | `POST /chat` | 채팅. 답이 만들어지는 과정을 실시간으로 보냅니다 |
+| `POST /files/upload-pdf`, `POST /rag/register` | 내규 PDF 올리기, 법령 검색에 함께 쓰이도록 적재 |
+| `GET /rag/show_files_in_collection`, `POST /rag/delete_objects_from_file_name` | 올린 문서 목록, 삭제 |
+| `POST /admin/legal/ingest`, `POST /admin/legal/reset` | 법령 다시 적재, 초기화(`X-Admin-Token` 필요) |
 | `POST /financial/corp_list` | 기업명 검색 |
 | `GET /health/budget` | 유료 API 누적 비용 |
 

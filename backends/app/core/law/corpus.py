@@ -65,7 +65,10 @@ class Corpus:
     annexes: dict[str, Annex]
 
     def get(self, key: str) -> Article | Annex | None:
-        return self.articles.get(key) or self.annexes.get(key)
+        """코퍼스 조문·별표, 없으면 사용자가 올린 내규 조문."""
+        from app.core.law import uploads
+
+        return self.articles.get(key) or self.annexes.get(key) or uploads.get_article(key)
 
     def level_of(self, law_key: str) -> str | None:
         return next((d["level"] for d in self.docs if d["key_name"] == law_key), None)

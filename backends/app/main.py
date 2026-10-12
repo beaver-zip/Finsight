@@ -13,7 +13,7 @@ from app.agents.company.graph import build_company_graph
 from app.agents.legal.graph import build_legal_graph, make_runner
 from app.agents.legal.tools import LawTools
 from app.agents.orchestrator.graph import build_orchestrator, serializer
-from app.api import chat, financial, report
+from app.api import admin, chat, documents, financial, report
 from app.core.cache import get_cache
 from app.core.dart.client import DartClient
 from app.core.search import tavily
@@ -69,6 +69,9 @@ app.add_middleware(CORSMiddleware, allow_origins=get_settings().cors_origin_list
 app.include_router(report.router, prefix="/report", tags=["Report"])
 app.include_router(financial.router, prefix="/financial", tags=["Financial"])
 app.include_router(chat.router, prefix="/chat", tags=["Chat"])
+app.include_router(documents.files_router, prefix="/files", tags=["Documents"])
+app.include_router(documents.rag_router, prefix="/rag", tags=["Documents"])
+app.include_router(admin.router, prefix="/admin", tags=["Admin"])
 
 
 @app.get("/", tags=["Root"])

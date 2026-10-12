@@ -4,6 +4,8 @@ import { useNavigate } from "react-router-dom";
 import { ChevronLeft, Sparkles, RotateCcw } from "lucide-react";
 
 import { ChatForm } from "../components/ChatForm";
+import { Modal } from "../components/steps/Modal";
+import { useCollectionFiles } from "../hooks/useCollectionFiles";
 import { Bubble } from "../components/Bubble";
 import { LoadingSpinner } from "../components/LoadingSpinner";
 import type { Message } from "../ChatContext";
@@ -29,6 +31,20 @@ function Chatbot() {
   const [queryMode, setQueryMode] = useState<QueryMode>("auto");
   const [awaitingResume, setAwaitingResume] = useState(false);
   const { send, isLoading, resetThread } = useChatStream();
+
+  // 지식베이스(사용자가 올린 내규 PDF): 업로드 → 벡터 적재 → 목록·삭제
+  const { files: collectionFiles, refetch: refetchCollectionFiles } = useCollectionFiles();
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [currentStep, setCurrentStep] = useState(1);
+  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const openModal = () => {
+    setCurrentStep(1);
+    setIsModalOpen(true);
+  };
+  const closeModal = () => {
+    setIsModalOpen(false);
+    refetchCollectionFiles();
+  };
 
   const chatEndRef = useRef<null | HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -175,9 +191,10 @@ function Chatbot() {
       onChange={(e) => setInputValue(e.target.value)}
       onKeyDown={handleKeyDown}
       onClick={handleSubmit}
-      handleOpenModal={() => {}}
-      collectionFiles={[]}
-      handleFileDelete={() => {}}
+      handleOpenModal={openModal}
+      collectionFiles={collectionFiles}
+      handleFileDelete={() => refetchCollectionFiles()}
+      showKnowledgeBase
       hasMessages={hasMessages}
       isLoading={isLoading}
       queryMode={queryMode}
@@ -210,6 +227,22 @@ function Chatbot() {
           </button>
         </div>
       </header>
+
+      {isModalOpen && (
+        <Modal
+          currentStep={currentStep}
+          uploadedFiles={uploadedFiles}
+          onClose={closeModal}
+          onUploadSuccess={(files) => {
+            setUploadedFiles(files);
+            setCurrentStep(2);
+          }}
+          onTriggerSuccess={() => {
+            setCurrentStep(3);
+            refetchCollectionFiles();
+          }}
+        />
+      )}
 
       {hasMessages ? (
         <div className="flex min-h-0 flex-1 flex-col">
