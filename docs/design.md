@@ -871,7 +871,7 @@ class FinalAnswer(BaseModel):  # agents/orchestrator/graph.py
 | 트레이싱 | LangSmith | 환경 변수로 LangGraph를 추적하고 SDK 호출은 `traceable`로 감싼다 |
 | 그래프 저장소 | Neo4j | networkx 구현과 확장 단계 지연(P50·P95)을 비교한다 |
 | 리랭커 | 로컬 `bge-reranker-v2-m3` | `sentence-transformers` CrossEncoder. MPS가 있으면 쓴다. M1(8코어) 측정: 후보 40개 CPU 21초, MPS 8~11초. 그래서 후보를 하이브리드 20개, 확장 20개로 줄였다(2026-10-12 사용자 결정, 검색 1회 9.6→7.0초, 확장 16.1→7.6초) |
-| 체크포인터·Store | SQLite | `AsyncSqliteSaver`, `AsyncSqliteStore` |
+| 체크포인터·Store | SQLite | `AsyncSqliteSaver`, `AsyncSqliteStore`는 쓰지 않는다(장기 메모리 없음) |
 | v1 비교 | 하지 않는다 | v1 재현 구성을 평가에서 뺀다 |
 | 평가 라벨 | Haiku 5.5 초안 + 사람 검수 | 평가셋별 검수 수정 건수를 결과표에 싣는다 |
 | 리포트 디자인 | 목업 v9 | 회색 체계 + 초록 강조 하나, 등락에만 빨강·파랑. BBC·Economist 차트 문법, Pretendard 내장 |
