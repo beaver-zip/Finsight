@@ -1,0 +1,96 @@
+{
+ "config": "L3a",
+ "suite": "legal",
+ "split": "dev",
+ "params": {
+  "stage": "L3a",
+  "alpha": 0.5,
+  "answer": true
+ },
+ "metrics": {
+  "cite_precision": {
+   "mean": 0.6033333333333333,
+   "lo": 0.4933333333333333,
+   "hi": 0.72,
+   "n": 25
+  },
+  "cite_recall": {
+   "mean": 0.88,
+   "lo": 0.78,
+   "hi": 0.96,
+   "n": 25
+  },
+  "correctness": {
+   "mean": 0.92,
+   "lo": 0.8666666666666666,
+   "hi": 0.9733333333333333,
+   "n": 25
+  },
+  "false_refusal": {
+   "mean": 0.0,
+   "lo": 0.0,
+   "hi": 0.0,
+   "n": 25
+  },
+  "groundedness": {
+   "mean": 0.7951388888888888,
+   "lo": 0.6770833333333334,
+   "hi": 0.90625,
+   "n": 24
+  },
+  "mrr": {
+   "mean": 0.94,
+   "lo": 0.88,
+   "hi": 1.0,
+   "n": 25
+  },
+  "ndcg@10": {
+   "mean": 0.9033913743990073,
+   "lo": 0.8314623368967501,
+   "hi": 0.9635154631992972,
+   "n": 25
+  },
+  "path_complete": {
+   "mean": 0.6666666666666666,
+   "lo": 0.3333333333333333,
+   "hi": 0.8888888888888888,
+   "n": 9
+  },
+  "recall@10": {
+   "mean": 0.94,
+   "lo": 0.88,
+   "hi": 1.0,
+   "n": 25
+  },
+  "recall@5": {
+   "mean": 0.94,
+   "lo": 0.88,
+   "hi": 1.0,
+   "n": 25
+  },
+  "refusal_correct": {
+   "mean": 1.0,
+   "lo": 1.0,
+   "hi": 1.0,
+   "n": 4
+  }
+ },
+ "meta": {
+  "threshold_sweep": {
+   "threshold": 0.3,
+   "balanced": 1.0,
+   "refuse_unanswerable": 1.0,
+   "answer_answerable": 1.0
+  },
+  "judge": "google/gemini-2.5-flash (임시 judge)",
+  "ops": {
+   "latency_p50_s": 24.86,
+   "latency_p95_s": 39.95,
+   "cost_total_usd": 0.0612,
+   "cost_per_item_usd": 0.00211,
+   "errors": 0
+  },
+  "n_items": 29
+ },
+ "runs": "1회 실행"
+}

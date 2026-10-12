@@ -11,7 +11,7 @@ import re
 from pydantic import BaseModel
 
 from app.core import llm
-from app.domain.binding import render
+from app.domain.binding import SLOT, render
 from app.domain.models import Citation, Claim, Metric, SubResult, VerificationIssue
 
 
@@ -100,6 +100,8 @@ def to_markdown(claims: list[Claim], metrics: dict[str, Metric], citations: list
         t = render(c.text, metrics)
         t = re.sub(r"\s*\[(n\d+)\]", lambda m: ref(m.group(1)), t)
         marks = "".join(ref(k) for k in c.legal_keys)
+        if c.metric_ids or SLOT.search(c.text):            # 리포트 숫자를 쓴 문단은 정기보고서 공시를 출처로 단다
+            marks += "".join(ref(x.id) for x in citations if x.kind == "filing")
         paras.append(t.rstrip() + marks)
     body = "\n\n".join(paras)
     if used:

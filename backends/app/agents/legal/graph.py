@@ -1,6 +1,6 @@
 """법령 리서치 서브그래프: 질문 분석 → 검색·리랭크(시드) → 인용 그래프 확장 → 충분성 판단 ⇄ 재검색(최대 2회) → 답변.
 
-시드 최고 점수가 임계값 미만이면 cited()를 부르지 않고 상위 조문 제목만 돌려준다. 재검색 2회 뒤에도 부족하면 찾은 조문으로 답한다.
+원래 질문 기준 리랭크 최고 점수가 임계값 미만이면 cited()를 부르지 않고 상위 조문 제목만 돌려준다. 재검색 2회 뒤에도 부족하면 찾은 조문으로 답한다.
 """
 from __future__ import annotations
 
@@ -15,7 +15,8 @@ from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel
 
 from app.agents.legal.answer import build_answer
-from app.agents.legal.tools import LawTools, doc_text, normalize, short_name
+from app.agents.legal.tools import LawTools, doc_text, focus_text, normalize, short_name
+from app.core.reranker import rerank
 from app.core import llm
 from app.domain.models import ArticleHit, LegalAnswer
 
@@ -52,7 +53,8 @@ class LegalState(TypedDict, total=False):
     context: list[ArticleHit]
     missing: list[str]
     loops: int
-    low_score: bool                 # 시드 최고 리랭크 점수가 임계값 미만(거절)
+    low_score: bool                 # 원래 질문 기준 리랭크 최고 점수가 임계값 미만(거절)
+    q_score: float                  # 원래 질문과 시드 조문의 리랭크 최고 점수(거절 판정에 쓴다)
     answer: LegalAnswer | None
     texts: dict[str, str]           # 답변에 넘긴 조문 key → 본문(검증용)
     errors: Annotated[list[str], operator.add]
@@ -105,7 +107,13 @@ async def retrieve(state: LegalState, config: RunnableConfig) -> dict:
             if h.article.key not in best or h.score > best[h.article.key].score:
                 best[h.article.key] = h
     seeds = sorted(best.values(), key=lambda h: -h.score)[:c.k + 4 * (state.get("loops") or 0)]
-    return {"seeds": seeds}
+    if state.get("loops"):
+        return {"seeds": seeds}
+    # 거절 판정은 바꾼 질의가 아니라 원래 질문으로 한다: 법령 용어로 바꾼 질의는 코퍼스 밖 질문에도 높은 점수를 냈다
+    # (2026-10-12 평가: "신용정보 삭제 기간" → "전자금융거래기록 파기", 시드 점수 1.0)
+    q = normalize(state["question"])
+    sc = await rerank(q, [focus_text(h.article, q) for h in seeds[:c.k]])
+    return {"seeds": seeds, "q_score": max(sc, default=0.0)}
 
 
 async def expand(state: LegalState, config: RunnableConfig) -> dict:
@@ -125,7 +133,7 @@ async def expand(state: LegalState, config: RunnableConfig) -> dict:
 async def judge(state: LegalState, config: RunnableConfig) -> dict:
     c = _cfg(config)
     seeds = state.get("seeds") or []
-    if not seeds or seeds[0].score < c.threshold:
+    if not seeds or state.get("q_score", seeds[0].score) < c.threshold:
         return {"missing": [], "low_score": True}                   # 근거 없음 → 거절
     ctx = "\n\n".join(f"[{short_name(h.article.key)}] {doc_text(h.article)[:1200]}" for h in state["context"])
     try:

@@ -39,13 +39,14 @@ def parse_cell(s: str, div: float) -> float | None:
 
 def numeric_scores(data: dict | None, fs_div: str | None, gold: list[dict]) -> dict:
     if not data:
-        return {"num_match": 0.0, "num_coverage": 0.0, "num_error": None}
+        return {"num_match": 0.0, "num_coverage": 0.0, "num_error": None, "_detail": []}
     t = data["tables"].get("annual") or {}
     heads = t.get("heads", [])
     div = 1e9 if data.get("table_unit") == "십억원" else 1e8
     rows = {r["head"]: r["cells"] for r in t.get("rows", [])}
     want = [g for g in gold if g["metric"] in ROWS and (g["metric"] != "net_income" or g["fs_div"] == "OFS")]
     match = given = wrong = 0
+    detail = []
     for g in want:
         year = g["period"][:4]
         label = ROWS[g["metric"]] if g["metric"] != "net_income" else ("지배순이익" if "지배순이익" in rows else "순이익")
@@ -57,13 +58,14 @@ def numeric_scores(data: dict | None, fs_div: str | None, gold: list[dict]) -> d
             continue
         given += 1
         gv = float(Decimal(g["value"]))
-        if gv and abs(v - gv) / abs(gv) <= TOL:
-            match += 1
-        else:
-            wrong += 1
+        ok = bool(gv) and abs(v - gv) / abs(gv) <= TOL
+        match += ok
+        wrong += not ok
+        detail.append({"metric": g["metric"], "period": g["period"], "report": v, "gold": gv, "ok": ok,
+                       "gold_rcept_no": g.get("rcept_no")})
     n = len(want)
     return {"num_match": match / n if n else None, "num_coverage": given / n if n else None,
-            "num_error": wrong / given if given else None}
+            "num_error": wrong / given if given else None, "_detail": detail}
 
 
 async def support_rate(claims, ev) -> float | None:
@@ -134,14 +136,19 @@ async def run(items: list[dict], p: dict[str, Any]) -> tuple[list[dict], dict]:
                 ver = state.get("verification")
                 claims2 = finalize(final.claims(), ver) if final is not None and ver is not None and not ver.passed \
                     else (final.claims() if final is not None else [])
-                sc["support_R2"] = await support_rate(claims2, ev)
+                flagged = [c for c in claims2 if c.text.rstrip().endswith("(근거 불충분)")]
+                clean = [c for c in claims2 if c not in flagged]
+                sc["support_R2"] = await support_rate(clean, ev)       # "(근거 불충분)" 표시가 붙은 주장은 따로 센다
+                sc["flagged_R2"] = len(flagged) / len(claims2) if claims2 else None
                 sc["claims_dropped_R2"] = 1 - len(claims2) / len(final.claims()) if final is not None else None
                 types: dict[str, int] = {}
                 for i in first_ver.issues:
                     types[i.type] = types.get(i.type, 0) + 1
             else:
                 types = {}
+            detail = sc.pop("_detail", [])
             out.append({"id": it["id"], "name": it["name"], "stratum": it["stratum"], "fs_div": fs, "scores": sc,
+                        "numeric_detail": detail,
                         "issue_types_R1": types, "errors": state.get("errors"),
                         "latency_s": round(time.perf_counter() - t0, 2), "cost_usd": round(usage.cost_usd, 6)})
     return out, {"judge": judge.judge_model()[0] + (" (임시 judge)" if judge.judge_model()[1] else ""),
