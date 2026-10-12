@@ -60,10 +60,12 @@ async def run_legal(instruction: str, runner: LegalRunner | None) -> tuple[SubRe
     if runner is None:
         return SubResult(agent="legal", content="", error="법령 검색 DB(Weaviate·Neo4j)가 연결되지 않았다"), EvidencePart()
     ans, texts = await runner(instruction)
+    if not ans.answerable:          # 거절이면 합성이 그 조문을 근거로 쓰지 않도록 내용·인용을 비운다
+        return (SubResult(agent="legal", content=f"'{instruction}'에 답할 조문을 찾지 못했다."),
+                EvidencePart(legal_answer=ans))
     md = render_markdown(ans, load_corpus())
-    keys = sorted({c.source for p in ans.points for c in p.citations}) if ans.answerable else ans.fallback
-    return (SubResult(agent="legal", content=md, claims=legal_claims(ans) if ans.answerable else [],
-                      citations=legal_citations(keys)),
+    keys = sorted({c.source for p in ans.points for c in p.citations})
+    return (SubResult(agent="legal", content=md, claims=legal_claims(ans), citations=legal_citations(keys)),
             EvidencePart(legal=texts, legal_answer=ans))
 
 
