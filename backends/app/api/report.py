@@ -76,7 +76,7 @@ async def build_report(st: AppState, corp_code: str) -> dict:
     out = await st.company_graph.ainvoke({"corp": profile, "errors": []}, config=cfg)
     rep = _to_report(out, round(usage.cost_usd, 5))
     value = {"html": out.get("html", ""), "json": rep.model_dump(mode="json")}
-    if out.get("draft") is not None:   # 본문까지 만든 리포트만 캐시한다
+    if out.get("draft") is not None and not usage.exceeded:   # 본문까지 만든 리포트만 캐시한다
         await cache.set("report", key, value, ttl_s=WEEK)
     return value
 
@@ -86,6 +86,8 @@ def _http_error(e: Exception) -> HTTPException:
         return HTTPException(429, "OpenDART 요청 한도를 넘었습니다")
     if isinstance(e, budget.BudgetExceeded):
         return HTTPException(402, str(e))
+    if isinstance(e, budget.TokenBudgetExceeded):
+        return HTTPException(429, str(e))
     if isinstance(e, DartError):
         return HTTPException(502, str(e))
     return HTTPException(500, f"보고서 생성 중 오류: {e}")
@@ -106,6 +108,17 @@ async def report_json(corp_code: str, st: AppState = Depends(get_state)):
         return (await build_report(st, corp_code))["json"]
     except Exception as e:  # noqa: BLE001
         raise _http_error(e) from e
+
+
+def error_code(e: Exception) -> str:
+    """SSE error 이벤트 code."""
+    if isinstance(e, DartLimit):
+        return "DART_LIMIT"
+    if isinstance(e, budget.BudgetExceeded):
+        return "BUDGET"
+    if isinstance(e, budget.TokenBudgetExceeded):
+        return "TOKEN_BUDGET"
+    return "INTERNAL"
 
 
 def _sse(event: str, data: dict) -> str:
@@ -136,16 +149,16 @@ async def report_stream(corp_code: str, st: AppState = Depends(get_state)):
                             final.setdefault("errors", []).extend(upd.get("errors", []) or [])
             final["corp"] = profile
             rep = _to_report(final, round(usage.cost_usd, 5))
-            if final.get("draft") is not None:
+            if final.get("draft") is not None and not usage.exceeded:
                 await get_cache().set("report", key, {"html": final.get("html", ""),
                                                       "json": rep.model_dump(mode="json")}, ttl_s=WEEK)
             for e in final.get("errors", []):
                 yield _sse("error", {"code": "PARTIAL", "message": e, "partial": True})
+            if (tb := budget.token_budget_event(usage)):
+                yield _sse("error", tb)
             yield _sse("final", {"html": final.get("html", ""), "cost_usd": rep.cost_usd})
         except Exception as e:  # noqa: BLE001
             log.exception("report stream 실패")
-            code = "DART_LIMIT" if isinstance(e, DartLimit) else "BUDGET" if isinstance(e, budget.BudgetExceeded) \
-                else "INTERNAL"
-            yield _sse("error", {"code": code, "message": str(e), "partial": False})
+            yield _sse("error", {"code": error_code(e), "message": str(e), "partial": False})
 
     return StreamingResponse(gen(), media_type="text/event-stream")

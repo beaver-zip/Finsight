@@ -117,6 +117,7 @@ function Chatbot() {
     setInputValue("");
     setAwaitingResume(false);
 
+    let cut = false; // 요청 토큰 상한에 걸려 일부 단계를 건너뛴 답
     send(
       { ...body, mode: queryMode },
       {
@@ -135,10 +136,16 @@ function Chatbot() {
           // 출처는 답변 마크다운 끝의 번호 목록(본문 [1]과 같은 번호)에 있으므로 따로 패널을 띄우지 않는다
           setTypingTextMap((prev) => ({
             ...prev,
-            [aid]: { answer: answer?.markdown ?? "답변을 만들지 못했습니다.", cites: [] },
+            [aid]: {
+              answer:
+                (answer?.markdown ?? "답변을 만들지 못했습니다.") +
+                (cut ? "\n\n> 요청 하나에 쓸 수 있는 토큰을 넘어 일부 단계를 건너뛰었습니다." : ""),
+              cites: [],
+            },
           }));
         },
-        onError: (message, partial) => {
+        onError: (message, partial, code) => {
+          if (code === "TOKEN_BUDGET") cut = true;
           if (partial) return; // 일부 단계 실패는 최종 답에 반영돼 있다
           setMessages((prev) =>
             prev.map((m) =>
