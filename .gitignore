@@ -22,3 +22,4 @@ frontends/*/.env
 backends/data/cache/
 backends/data/*.sqlite*
 backends/data/scratch/
+_workspace/
