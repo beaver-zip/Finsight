@@ -3,7 +3,7 @@
 1. 'II. 사업의 내용'의 '사업부문별 요약 재무 현황' 같은 글 표(삼성전자 형식)
 2. 연결재무제표 주석의 '영업부문에 대한 공시' 표(XBRL 형식이라 회사가 달라도 모양이 비슷하다)
 
-둘 다 못 읽으면 None(차트·표에서 뺀다).
+최신 보고서에서는 둘 다 읽어 부문이 더 많은 쪽을 고른다. 둘 다 못 읽으면 None(차트·표에서 뺀다).
 """
 from __future__ import annotations
 
@@ -79,7 +79,7 @@ _PERIOD = re.compile(r"(당|전)\s*(기|분기|반기|\d\s*분기)")
 _UNIT = re.compile(r"단위\s*:\s*(조원|억원|백만원|천원|원)")
 # 열 머리말에서 부문 이름이 아닌 층(XBRL 차원 이름)
 _GENERIC = {"부문", "영업부문", "보고부문", "부문의합계", "기업전체", "기업전체총계", "3개월", "누적", "당기", "당분기",
-            "당반기", "금액"}
+            "당반기", "금액", "고객의유형", "고객의유형합계"}   # 고객의 유형 합계: 부문마다 외부·내부고객 칸 옆의 부문 합계
 _DROP_COL = re.compile(r"합계|총계|소계|^계$|조정|제거|연결|내부|외부|비율|비중")
 _REV = (re.compile(r"^총(부문)?(매출액?|수익|영업수익)"),
         re.compile(r"^(부문)?(매출액?|영업수익|수익|매출수익)(\(.*\))?$"),
@@ -120,6 +120,7 @@ def _seg_name(path: list[str]) -> str | None:
     if not names:
         return None
     name = re.sub(r"\s*\(\*[\d,\s]*\)\s*", "", names[-1]).strip()
+    name = re.sub(r"(?<=\S)\s*부문$", "", name)      # 기간마다 '기타'·'기타부문'처럼 바뀌어 이름을 맞춘다
     return name or None
 
 
@@ -224,17 +225,21 @@ SOURCES = {"business": "정기보고서 사업부문별 요약 재무 현황(내
 
 async def segment_cumulative(http: httpx.AsyncClient, rcept_no: str, method: str | None = None
                              ) -> tuple[dict[str, dict[str, Decimal]], str] | None:
-    """정기보고서 하나의 누적 부문 실적과 읽은 곳('notes'·'business'). 주석 표가 형식이 일정해 먼저 본다.
+    """정기보고서 하나의 누적 부문 실적과 읽은 곳('notes'·'business').
 
     method를 주면 그 방식만 쓴다(기간마다 읽는 곳이 달라 부문 이름이 어긋나지 않게 최신 보고서의 방식을 따른다).
+    없으면 둘 다 읽어 부문이 더 많은 쪽을 쓰고, 같으면 사업의 내용 표를 쓴다(삼성전자는 주석 표에
+    'Harman'이 'Haman'으로 잘못 적혀 있다. 롯데쇼핑은 사업의 내용 표에서 일부 부문만 읽힌다).
     """
     try:
         ns = await viewer.nodes(http, rcept_no)
     except Exception as e:  # noqa: BLE001
         log.info("부문 목차 실패 %s: %s", rcept_no, e)
         return None
-    for m in ([method] if method else ["notes", "business"]):
-        got = await (_business(http, ns) if m == "business" else _notes(http, ns))
-        if got:
-            return got, m
-    return None
+    if method:
+        got = await (_business(http, ns) if method == "business" else _notes(http, ns))
+        return (got, method) if got else None
+    biz, notes = await _business(http, ns), await _notes(http, ns)
+    if biz and (not notes or len(biz) >= len(notes)):
+        return biz, "business"
+    return (notes, "notes") if notes else None

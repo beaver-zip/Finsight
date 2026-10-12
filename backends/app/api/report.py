@@ -25,7 +25,7 @@ from app.domain.models import Citation, CompanyReport
 log = logging.getLogger(__name__)
 router = APIRouter()
 WEEK = 7 * 86_400
-VERSION = "v2.1"            # 사실표가 바뀌면 올린다(v2.1: 연간 실적 사실표 추가)
+VERSION = "v2.2"            # 사실표가 바뀌면 올린다(v2.2: 주석 부문 표, 원문 재무제표로 채운 분기)
 
 
 def _to_report(out: dict, cost: float | None) -> CompanyReport:

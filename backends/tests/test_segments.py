@@ -28,7 +28,7 @@ def test_cumulative_columns_and_negative_parentheses():
     seg, unit = _notes("lge")
     assert unit == "백만원" and len(seg) == 6 and "부문 합계" not in seg
     assert seg["Home Appliance Solution"]["rev"] == 13_816_989 * M
-    assert seg["기타부문"]["op"] == -22_131 * M
+    assert seg["기타"]["op"] == -22_131 * M
 
 
 def test_simple_columns_gs_retail():
@@ -71,3 +71,37 @@ def test_business_text_rejects_total_and_number_names(junk):
     seg, unit = parse_segments(text)
     assert unit == "억원" and set(seg) == {"백화점", "할인점"}
     assert not any(re.search(r"\d", k) for k in seg)
+
+
+@pytest.mark.parametrize("biz,notes,want", [
+    ({"A": 1, "B": 2}, {"A": 1, "C": 2}, "business"),      # 같으면 사업의 내용(삼성전자 'Haman' 오기)
+    ({"A": 1, "B": 2}, {"A": 1, "B": 2, "C": 3}, "notes"),  # 주석이 더 많으면 주석(롯데쇼핑)
+    (None, {"A": 1, "B": 2}, "notes"),
+    (None, None, None),
+])
+async def test_latest_report_picks_source_with_more_segments(monkeypatch, biz, notes, want):
+    from app.core.dart import segments
+
+    async def nodes(http, rc):
+        return []
+
+    async def fake_biz(http, ns):
+        return biz
+
+    async def fake_notes(http, ns):
+        return notes
+
+    monkeypatch.setattr(segments.viewer, "nodes", nodes)
+    monkeypatch.setattr(segments, "_business", fake_biz)
+    monkeypatch.setattr(segments, "_notes", fake_notes)
+    got = await segments.segment_cumulative(None, "r")
+    assert (got[1] if got else None) == want
+    only = await segments.segment_cumulative(None, "r", "notes")
+    assert (only[1] if only else None) == ("notes" if notes else None)
+
+
+def test_customer_type_columns_use_segment_total():
+    # LG전자 2025년 1분기: 부문마다 외부고객·내부고객·고객의 유형 합계 세 칸, 기타부문 및 내부거래 열은 뺀다
+    seg, _ = _notes("lge_2025q1")
+    assert len(seg) == 5 and "기타" not in seg
+    assert seg["Home Appliance Solution"]["rev"] == 6_696_848 * M
