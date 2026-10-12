@@ -10,6 +10,7 @@ export type Message = {
   isPdfVisible?: boolean;
   pageNum?: number;
   cites?: any[];
+  options?: string[];       // 되묻기 선택지(/chat interrupt)
 };
 
 type ChatContextType = {
