@@ -12,7 +12,7 @@ from functools import lru_cache
 from lxml import etree
 
 from app.core.law.client import LawClient
-from app.core.law.parser import LawDoc, parse
+from app.core.law.parser import LawDoc, parse, parse_delegations
 from app.domain.models import Annex, Article
 from app.settings import BACKEND_DIR
 
@@ -41,8 +41,10 @@ async def fetch_all(client: LawClient) -> list[LawDoc]:
         serial = await current_serial(client, target, name)
         xml = await client.service(target, **({"MST": serial} if target == "law" else {"ID": serial}))
         d = parse(xml)
-        log.info("%s: 일련번호 %s, 시행 %s, 조문 %d, 별표 %d", d.name, serial, d.effective_date, len(d.articles),
-                 len(d.annexes))
+        if target == "law":            # 위임법령 조회: 이 법령 조문이 시행령 조문·행정규칙에 위임한 쌍
+            d.delegations = parse_delegations(await client.service("lsDelegated", MST=serial), d.key_name)
+        log.info("%s: 일련번호 %s, 시행 %s, 조문 %d, 별표 %d, 위임 %d", d.name, serial, d.effective_date, len(d.articles),
+                 len(d.annexes), len(d.delegations))
         docs.append(d)
     return docs
 
@@ -53,7 +55,8 @@ def save(docs: list[LawDoc]) -> None:
              "effective_date": d.effective_date.isoformat() if d.effective_date else None,
              "promulgation_no": d.promulgation_no,
              "articles": [a.model_dump(mode="json") for a in d.articles],
-             "annexes": [x.model_dump(mode="json") for x in d.annexes]} for d in docs]
+             "annexes": [x.model_dump(mode="json") for x in d.annexes],
+             "delegations": d.delegations} for d in docs]
     CORPUS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=1))
     load_corpus.cache_clear()
 
@@ -61,11 +64,15 @@ def save(docs: list[LawDoc]) -> None:
 @dataclass
 class Corpus:
     docs: list[dict]
+    delegations: list[dict]
     articles: dict[str, Article]
     annexes: dict[str, Annex]
 
     def get(self, key: str) -> Article | Annex | None:
-        return self.articles.get(key) or self.annexes.get(key)
+        """코퍼스 조문·별표, 없으면 사용자가 올린 내규 조문."""
+        from app.core.law import uploads
+
+        return self.articles.get(key) or self.annexes.get(key) or uploads.get_article(key)
 
     def level_of(self, law_key: str) -> str | None:
         return next((d["level"] for d in self.docs if d["key_name"] == law_key), None)
@@ -76,5 +83,6 @@ def load_corpus() -> Corpus:
     data = json.loads(CORPUS_FILE.read_text())
     arts = {a["key"]: Article.model_validate(a) for d in data for a in d["articles"]}
     anx = {x["key"]: Annex.model_validate(x) for d in data for x in d["annexes"]}
-    return Corpus(docs=[{k: v for k, v in d.items() if k not in ("articles", "annexes")} for d in data],
+    return Corpus(docs=[{k: v for k, v in d.items() if k not in ("articles", "annexes", "delegations")} for d in data],
+                  delegations=[x for d in data for x in d.get("delegations", [])],
                   articles=arts, annexes=anx)

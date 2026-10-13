@@ -16,7 +16,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 ACT = "전자금융거래법"
 DECREE = "전자금융거래법시행령"
@@ -154,10 +154,11 @@ def _int(s: str | None) -> int | None:
     return int(s) if s else None
 
 
-def delegates(upper_law: str, lower_law: str, upper_text: str) -> bool:
-    """상위 조문 본문에 하위 법령으로 위임하는 문구가 있는가."""
+def delegation_phrase(lower_law: str, upper_text: str) -> str | None:
+    """상위 조문 본문에서 하위 문서(lower_law)로 위임하는 문구. 없으면 None."""
     pat = DELEGATION.get(lower_law)
-    return bool(pat and pat.search(upper_text))
+    m = pat.search(upper_text) if pat else None
+    return m.group(0) if m else None
 
 
 # ---------------- 그래프 엣지
@@ -175,14 +176,20 @@ class Edge:
     to_para: int | None = None
     to_item: int | None = None
     phrase: str = ""
+    source: str = ""             # DELEGATES_TO: "regex"(정규식만) | "api"(위임법령 조회만) | "both"(둘 다)
 
 
-def build_edges(articles: list, known: set[str]) -> tuple[list[Edge], set[str]]:
-    """articles: (법령 key, Article) 목록. known: 코퍼스의 조문·별표 key.
+def build_edges(articles: list, known: set[str], api: list[dict] | None = None) -> tuple[list[Edge], set[str]]:
+    """articles: (법령 key, Article) 목록. known: 코퍼스의 조문·별표 key. api: 위임법령 조회 결과(parser.parse_delegations).
     돌려주는 것: 엣지 목록, 참조됐지만 코퍼스 밖인 법령 key 집합.
 
     - REFERS_TO: 조문 → 참조한 조문·별표(같은 (출발, 도착, 출발 항)은 하나로), 코퍼스 밖 법령은 법령 노드로.
-    - DELEGATES_TO: 하위 문서 조문 B가 상위 문서 조문 A를 참조하고, A 본문에 하위 문서로 위임하는 문구가 있으면 A → B.
+    - DELEGATES_TO: 두 가지로 찾아 맞춰 본다.
+      정규식: 하위 문서 조문 B가 상위 문서 조문 A를 참조하고, A 본문에 하위 문서로 위임하는 문구가 있으면 A → B.
+      API: 위임법령 조회가 준 (위임한 조문 → 시행령 조문) 쌍. 행정규칙은 API가 문서만 알려 줘서 조문 쌍은 정규식으로만 찾고,
+      같은 상위 조문이 그 행정규칙에 위임한다고 API가 확인하면 "both"로 둔다.
+      API 정보가 있는 상위 문서(법률·시행령)에서 정규식만 찾은 쌍은 위임이 아니라고 보고 뺀다(참조 엣지는 남는다).
+      API가 없는 상위 문서(감독규정 → 시행세칙)는 정규식 결과를 그대로 쓴다.
     """
     texts = {a.key: "\n".join(p.text for p in a.paragraphs) for _, a in articles}
     edges: dict[tuple, Edge] = {}
@@ -200,9 +207,30 @@ def build_edges(articles: list, known: set[str]) -> tuple[list[Edge], set[str]]:
                 edges.setdefault((a.key, r.key, "REFERS_TO", p.no),
                                  Edge(a.key, r.key, "REFERS_TO", r.raw, p.no, r.para, r.item))
                 if not r.annex and LEVEL_RANK.get(r.law, 9) < LEVEL_RANK.get(law, 9):
-                    m = DELEGATION.get(law)
-                    hit = m.search(texts.get(r.key, "")) if m else None
-                    if hit:
+                    phrase = delegation_phrase(law, texts.get(r.key, ""))
+                    if phrase:
                         edges.setdefault((r.key, a.key, "DELEGATES_TO", None),
-                                         Edge(r.key, a.key, "DELEGATES_TO", r.raw, phrase=hit.group(0)))
+                                         Edge(r.key, a.key, "DELEGATES_TO", r.raw, phrase=phrase, source="regex"))
+    doc_level = set()                      # API가 확인한 (상위 조문, 위임받은 행정규칙 문서)
+    for d in api or []:
+        if d.get("dst") is None:
+            doc_level.add((d["src"], d["dst_law"]))
+            continue
+        if d["src"] not in known or d["dst"] not in known:
+            continue
+        k = (d["src"], d["dst"], "DELEGATES_TO", None)
+        if k in edges:
+            edges[k] = replace(edges[k], source="both")
+        else:
+            edges[k] = Edge(d["src"], d["dst"], "DELEGATES_TO", d.get("clause", ""), phrase=d.get("phrase", ""),
+                            source="api")
+    covered = {d["src"].split(":")[0] for d in api or []}   # API 위임 정보가 있는 상위 문서
+    for k, e in list(edges.items()):
+        if e.kind != "DELEGATES_TO" or e.source != "regex":
+            continue
+        if (e.src, e.dst.split(":")[0]) in doc_level:
+            edges[k] = replace(e, source="both")
+        elif e.src.split(":")[0] in covered:
+            # API가 이 상위 문서의 위임을 모두 알려 주는데 없는 쌍: 정의 조항을 참조만 한 경우 등. 참조 엣지만 남긴다
+            del edges[k]
     return list(edges.values()), outside

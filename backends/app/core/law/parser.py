@@ -2,7 +2,7 @@
 
 - 법령(law): 조문단위 → 항 → 호 → 목 구조. 조문여부가 '전문'인 단위는 장·절 머리다.
 - 행정규칙(admrul): 조문내용 하나가 조문 하나(문자열)라서 항 머리(①…)로 나눈다. '제N장'만 있는 줄은 장 머리다.
-- 별표: 별표내용(고정폭 텍스트)을 줄 끝 공백과 빈 줄을 정리해 그대로 쓴다.
+- 별표: 별표내용(고정폭 텍스트)의 줄 끝 공백과 빈 줄을 정리하고, 괘선 표는 마크다운 표로 바꾼다(domain/annex_table.py).
 - 본문의 개정 이력 표시(<개정 2013.5.22>, [본조신설 …])는 검색·인용에 쓸모가 없어 지운다.
 """
 from __future__ import annotations
@@ -13,6 +13,7 @@ from datetime import date
 
 from lxml import etree
 
+from app.domain.annex_table import Vocab, convert
 from app.domain.models import Annex, Article, Paragraph
 
 CIRCLED = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳"
@@ -37,6 +38,7 @@ class LawDoc:
     promulgation_no: str | None
     articles: list[Article] = field(default_factory=list)
     annexes: list[Annex] = field(default_factory=list)
+    delegations: list[dict] = field(default_factory=list)   # 위임법령 조회 API 결과(parse_delegations)
 
 
 def key_name(name: str) -> str:
@@ -184,6 +186,9 @@ def parse_admrul(xml: str) -> LawDoc:
 # ---------------- 별표
 def _annexes(root: etree._Element, doc: LawDoc) -> list[Annex]:
     out = []
+    raw = [clean(u.findtext("별표내용")) for u in root.findall(".//별표단위")]
+    # 표 칸의 줄 잇기 판단에 쓰는 낱말 목록: 같은 문서 조문 본문 + 별표 본문
+    vocab = Vocab.build([p.text for a in doc.articles for p in a.paragraphs] + raw)
     for u in root.findall(".//별표단위"):
         if (u.findtext("별표구분") or "").strip() != "별표":      # 서식은 넣지 않는다
             continue
@@ -195,8 +200,47 @@ def _annexes(root: etree._Element, doc: LawDoc) -> list[Annex]:
             continue
         rel = _RELATED.search(title)
         related = article_key(doc.key_name, int(rel["no"]), int(rel["branch"] or 0)) if rel else None
-        out.append(Annex(key=annex_key(doc.key_name, no, branch), law_name=doc.name, title=title, text=text,
-                         related_article=related))
+        out.append(Annex(key=annex_key(doc.key_name, no, branch), law_name=doc.name, title=title,
+                         text=convert(text, vocab), related_article=related))
+    return out
+
+
+def _nums(s: str | None) -> list[int]:
+    return [int(x) for x in (s or "").split(",") if x.strip().isdigit()]
+
+
+def parse_delegations(xml: str, law_key: str) -> list[dict]:
+    """위임법령 조회(lawService.do, target=lsDelegated) → 위임 쌍 목록.
+
+    {"src": 위임한 조문 key, "dst_law": 위임받은 문서 key, "dst": 위임받은 조문 key(행정규칙은 문서 단위라 None),
+     "kind": 시행령·시행규칙·위임행정규칙, "phrase": 위임 문구가 든 줄, "clause": "제2조제15호가목"}.
+    '인용법령'(다른 법령을 인용만 한 것)은 위임이 아니라 뺀다.
+    """
+    root = etree.fromstring(xml.encode())
+    out: list[dict] = []
+    for u in root.iter("위임조문정보"):
+        j = u.find("조정보")
+        if j is None or not (j.findtext("조문번호") or "").strip().isdigit():
+            continue
+        src = article_key(law_key, int(j.findtext("조문번호")), int((j.findtext("조문가지번호") or "0").strip() or 0))
+        for w in u.findall("위임정보"):
+            kind = (w.findtext("위임구분") or "").strip()
+            if kind in ("시행령", "시행규칙"):
+                dst_law = key_name(w.findtext("위임법령제목") or "")
+                for x in w.findall("위임법령조문정보"):
+                    nos, brs = _nums(x.findtext("위임법령조문번호")), _nums(x.findtext("위임법령조문가지번호"))
+                    for i, no in enumerate(nos):
+                        if no <= 0:
+                            continue
+                        br = brs[i] if i < len(brs) else 0
+                        out.append({"src": src, "dst_law": dst_law, "dst": article_key(dst_law, no, br), "kind": kind,
+                                    "phrase": (x.findtext("라인텍스트") or "").strip(),
+                                    "clause": (x.findtext("조항호목") or "").strip()})
+            elif kind == "위임행정규칙":
+                for x in w.findall("위임행정규칙조문정보"):
+                    out.append({"src": src, "dst_law": key_name(x.findtext("위임행정규칙제목") or ""), "dst": None,
+                                "kind": kind, "phrase": (x.findtext("라인텍스트") or "").strip(),
+                                "clause": (x.findtext("조항호목") or "").strip()})
     return out
 
 

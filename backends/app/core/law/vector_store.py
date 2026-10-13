@@ -14,6 +14,7 @@ from weaviate.classes.config import Configure, DataType, Property, Tokenization
 from weaviate.classes.query import Filter, HybridFusion, MetadataQuery
 
 from app.core.embeddings import embed
+from app.domain.annex_table import split_annex
 from app.domain.models import Annex, Article
 from app.settings import get_settings
 
@@ -54,16 +55,10 @@ def article_chunks(a: Article) -> list[Chunk]:
 
 
 def annex_chunks(x: Annex, level: str) -> list[Chunk]:
+    """별표는 ANNEX_CHUNK자 이하로 자른다. 표는 행 단위로 자르고 조각마다 표 머리 행을 붙인다."""
     no = x.key.split(":annex-")[-1].replace("-", "의")
     h = f"[{x.law_name}] [별표 {no}] {x.title}"
-    out, buf = [], ""
-    for line in x.text.split("\n"):
-        if buf and len(buf) + len(line) + 1 > ANNEX_CHUNK:
-            out.append(buf)
-            buf = ""
-        buf = f"{buf}\n{line}" if buf else line
-    if buf:
-        out.append(buf)
+    out = split_annex(x.text, ANNEX_CHUNK)
     return [Chunk(f"{x.key}:c{i}", x.key, x.law_name, level, "lawgo", h, t) for i, t in enumerate(out)]
 
 
@@ -111,12 +106,15 @@ class LawVectors:
                 for c, v in zip(chunks, vecs)]
         res = await col.data.insert_many(objs)
         if res.has_errors:
-            raise RuntimeError(f"Weaviate 적재 오류 {len(res.errors)}건: {list(res.errors.values())[:1]}")
+            first = next(iter(res.errors.values()))
+            raise RuntimeError(f"Weaviate 적재 오류 {len(res.errors)}건: {first.message[:300]}")   # 벡터는 찍지 않는다
         return len(objs)
 
-    async def delete_source(self, source: str) -> None:
+    async def delete_doc(self, law_name: str, source: str = "upload") -> None:
+        """올린 문서 하나의 청크만 지운다(법령 코퍼스는 source가 달라 지워지지 않는다)."""
         col = self.client.collections.get(COLLECTION)
-        await col.data.delete_many(where=Filter.by_property("source").equal(source))
+        await col.data.delete_many(where=Filter.by_property("source").equal(source)
+                                   & Filter.by_property("law_name").equal(law_name))
 
     async def hybrid(self, query: str, *, alpha: float = 0.5, limit: int = 40,
                      levels: list[str] | None = None) -> list[ChunkHit]:

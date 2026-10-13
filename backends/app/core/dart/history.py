@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 
 from app.core.dart import financials as dart_fin
+from app.core.dart import original
 from app.core.dart.client import DartClient
 from app.domain.accounts import STANDARD, find_line
 from app.domain.models import FinancialSnapshot
@@ -19,8 +20,9 @@ log = logging.getLogger(__name__)
 RC = {1: "11013", 2: "11012", 3: "11014", 4: "11011"}
 RC_Q = {v: k for k, v in RC.items()}
 FIRST_YEAR = 2016                  # OpenDART 분기 재무제표가 있는 첫해
+ORIGINAL_QUARTERS = 20             # 재무 API에 없는 분기를 원문에서 읽는 범위(최근 5년)
 PL_ITEMS = ("revenue", "operating_income", "net_income", "net_income_owners")
-CASH_ITEMS = ("revenue", "net_income", "cfo", "capex", "intangible_capex", "buyback", "dividends_paid",
+CASH_ITEMS = ("revenue", "operating_income", "net_income", "net_income_owners", "cfo", "capex", "intangible_capex", "buyback", "dividends_paid",
               "cash", "st_fin", "st_amort", "st_fvpl", "st_borrow", "cur_ltd", "bonds", "lt_borrow",
               "receivables", "inventory", "equity_owners")
 
@@ -97,12 +99,45 @@ async def _snap(dart: DartClient, corp_code: str, y: int, q: int, acc_mt: int | 
         return None
 
 
+async def from_original(dart: DartClient, corp_code: str, periods: list[tuple[int, int]],
+                        acc_mt: int | None) -> dict[tuple[int, int], FinancialSnapshot]:
+    """재무 API에 없는 분기를 정기보고서 원문 재무제표에서 읽는다(원문이 없는 분기는 건너뛴다)."""
+    if not periods:
+        return {}
+    try:
+        reports = await original.periodic_reports(dart, corp_code, min(y for y, _ in periods), acc_mt)
+    except Exception as e:  # noqa: BLE001
+        log.info("정기보고서 목록 실패 %s: %s", corp_code, e)
+        return {}
+    out = {}
+    for y, q in periods:
+        rc = reports.get((y, RC[q]))
+        if rc is None:
+            continue
+        try:
+            rows, fs_div = await original.statements(dart, rc, RC[q])
+        except Exception as e:  # noqa: BLE001
+            log.info("원문 재무제표 실패 %s %s: %s", corp_code, rc, e)
+            continue
+        if rows:
+            out[(y, q)] = FinancialSnapshot(corp_code=corp_code, rcept_no=rc, bsns_year=y, reprt_code=RC[q],  # type: ignore[arg-type]
+                                            fs_div=fs_div, period_label=dart_fin.period_label(y, RC[q], acc_mt),  # type: ignore[arg-type]
+                                            lines=dart_fin.parse_lines(rows))
+    return out
+
+
 async def quarterly_history(dart: DartClient, corp_code: str, last: tuple[int, int], *,
-                            first_year: int = FIRST_YEAR, acc_mt: int | None = 12) -> History:
-    """first_year 1분기부터 last 분기까지. 보고서가 없는 분기는 값이 비어 있다."""
+                            first_year: int = FIRST_YEAR, acc_mt: int | None = 12, use_original: bool = True) -> History:
+    """first_year 1분기부터 last 분기까지. 보고서가 없는 분기는 값이 비어 있다.
+
+    최근 ORIGINAL_QUARTERS 분기 중 재무 API가 비어 있는 분기는 원문 재무제표로 채운다(use_original).
+    """
     periods = quarters_between((first_year, 1), last)
     snaps_list = await asyncio.gather(*(_snap(dart, corp_code, y, q, acc_mt) for y, q in periods))
     snaps = {p: s for p, s in zip(periods, snaps_list) if s is not None}
+    if use_original:
+        recent = set(periods[-ORIGINAL_QUARTERS:])
+        snaps.update(await from_original(dart, corp_code, [p for p in periods if p in recent and p not in snaps], acc_mt))
     rows = []
     for (y, q) in periods:
         s = snaps.get((y, q))
@@ -111,6 +146,9 @@ async def quarterly_history(dart: DartClient, corp_code: str, last: tuple[int, i
             for it in PL_ITEMS:
                 if q < 4:
                     v = value(s, it, "thstrm_amount")
+                    if v is None and q > 1:     # 3개월 칸이 없으면 누적에서 직전 분기 누적을 뺀다
+                        c, p = cum_value(s, it), cum_value(snaps.get((y, q - 1)), it)
+                        v = None if c is None or p is None else c - p
                 else:
                     fy, s3 = value(s, it, "thstrm_amount"), cum_value(snaps.get((y, 3)), it)
                     v = None if fy is None or s3 is None else fy - s3
@@ -135,5 +173,6 @@ async def cumulative_items(dart: DartClient, corp_code: str, periods: list[tuple
             continue
         row = {it: cum_value(s, it) for it in CASH_ITEMS}
         row["rcept_no"] = s.rcept_no
+        row["fs_div"] = s.fs_div
         out[(y, q)] = row
     return out

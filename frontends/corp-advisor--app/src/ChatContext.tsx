@@ -6,10 +6,6 @@ export type Message = {
   type: "question" | "answer" | "loading";
   text: string | React.ReactNode;
   isStreaming?: boolean;
-  pdfUrl?: string | null;
-  isPdfVisible?: boolean;
-  pageNum?: number;
-  cites?: any[];
   options?: string[];       // 되묻기 선택지(/chat interrupt)
 };
 

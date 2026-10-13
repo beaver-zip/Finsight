@@ -42,13 +42,6 @@ async def search_news(query: str, *, time_range: tavily.TimeRange = "month", max
     return _hits(data)
 
 
-async def search_web(query: str, *, time_range: tavily.TimeRange | None = "month", max_results: int = 10,
-                     http: httpx.AsyncClient | None = None) -> list[SearchHit]:
-    data = await tavily.search(query, topic="general", country="south korea", time_range=time_range,
-                               max_results=max_results, include_published_date=True, http=http)
-    return _hits(data)
-
-
 def _hits(data: dict) -> list[SearchHit]:
     out = []
     for i, r in enumerate(data.get("results", [])):

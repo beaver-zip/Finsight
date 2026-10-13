@@ -190,7 +190,7 @@ async def write_report(state: CompanyState, config: RunnableConfig) -> dict:
 
 def evidence_of(state: CompanyState) -> Evidence:
     ev = Evidence.build(state.get("metrics", {}), state.get("news", []), state.get("news_text", {}),
-                        state.get("regulatory", []), state.get("legal_texts", {}))
+                        state.get("legal_texts", {}))
     data = state.get("data")
     if data is not None:
         seen = [display(m) for m in data.facts.values()] + [m.label for m in data.facts.values()]

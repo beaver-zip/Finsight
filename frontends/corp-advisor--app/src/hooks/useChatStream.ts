@@ -23,7 +23,7 @@ type Handlers = {
   onProgress?: (detail: string) => void;
   onInterrupt?: (it: Interrupt) => void;
   onFinal?: (answer: FinalAnswer | null) => void;
-  onError?: (message: string, partial: boolean) => void;
+  onError?: (message: string, partial: boolean, code?: string) => void;
 };
 
 function newThreadId(): string {
@@ -81,7 +81,7 @@ export function useChatStream() {
               h.onFinal?.(data.answer);
               finished = true;
             } else if (ev === "error") {
-              h.onError?.(data.message, Boolean(data.partial));
+              h.onError?.(data.message, Boolean(data.partial), data.code);
               if (!data.partial) finished = true;
             }
           }

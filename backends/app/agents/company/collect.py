@@ -15,11 +15,11 @@ import httpx
 from app.core.dart.client import DartClient
 from app.core.dart.history import RC, RC_Q, History, QRow, cumulative_items, quarterly_history
 from app.core.dart.prelim import Prelim, PrelimFiling, first_per_quarter, latest_prelim, prelim_filings
-from app.core.dart.segments import segment_cumulative
+from app.core.dart.segments import SOURCES, segment_cumulative
 from app.core.dart.shares import BuybackDecision, Dividend, Shares, buyback_decisions, dividend, share_counts
 from app.core.market import daily_close, index_ticker, splits, ticker_for
 from app.core.peers import PeerRow, peer_rows, pref_price
-from app.domain.metrics import industry_group
+from app.domain.accounts import industry_group
 from app.domain.models import CorpProfile, PeriodicFiling
 
 log = logging.getLogger(__name__)
@@ -43,6 +43,7 @@ class Collected:
     pref_px: float | None = None
     prelim_firsts: list[PrelimFiling] = field(default_factory=list)
     segments: dict[tuple[int, int], dict[str, dict[str, Decimal]]] = field(default_factory=dict)
+    segment_source: str = ""
     peers: list[PeerRow] = field(default_factory=list)
     industry: str = "general"
     errors: list[str] = field(default_factory=list)
@@ -77,9 +78,6 @@ async def collect(dart: DartClient, http: httpx.AsyncClient, corp: CorpProfile, 
     listed = bool(corp.stock_code)
     tk = ticker_for(corp.stock_code, corp.corp_cls) if listed else None
     itk, out.index_name = index_ticker(corp.corp_cls)
-
-    async def none():
-        return None
 
     async def empty():
         return []
@@ -117,9 +115,19 @@ async def collect(dart: DartClient, http: httpx.AsyncClient, corp: CorpProfile, 
         return {d.year: d for d in got if isinstance(d, Dividend)}
 
     async def segments_all():
-        got = await asyncio.gather(*(segment_cumulative(http, hist.snapshots[p].rcept_no) for p in seg_periods),
-                                   return_exceptions=True)
-        return {p: s for p, s in zip(seg_periods, got) if isinstance(s, dict) and s}
+        # 최신 보고서에서 읽힌 곳(사업의 내용·주석)을 나머지 기간에도 쓴다. 섞이면 부문 이름이 어긋난다.
+        if not seg_periods:
+            return {}
+        first = await segment_cumulative(http, hist.snapshots[seg_periods[-1]].rcept_no)
+        if not first:
+            return {}
+        cum, method = first
+        out.segment_source = SOURCES[method]
+        got = await asyncio.gather(*(segment_cumulative(http, hist.snapshots[p].rcept_no, method)
+                                     for p in seg_periods[:-1]), return_exceptions=True)
+        res = {p: s[0] for p, s in zip(seg_periods[:-1], got) if isinstance(s, tuple)}
+        res[seg_periods[-1]] = cum
+        return res
 
     out.shares, out.cum, out.dividends, out.segments = await asyncio.gather(
         _safe("shares", shares_all(), {}, err),

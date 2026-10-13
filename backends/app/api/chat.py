@@ -15,9 +15,8 @@ from langchain_core.messages import HumanMessage
 from langgraph.types import Command
 from pydantic import BaseModel
 
-from app.api.report import build_report
+from app.api.report import build_report, error_code
 from app.core import budget
-from app.core.dart.client import DartLimit
 from app.deps import AppState, get_state
 
 log = logging.getLogger(__name__)
@@ -26,7 +25,6 @@ router = APIRouter()
 
 class ChatRequest(BaseModel):
     thread_id: str
-    user_id: str | None = None
     message: str | None = None
     mode: Literal["auto", "legal", "company", "news"] = "auto"
     resume: str | None = None              # 되묻기에 대한 답(선택지 문자열 또는 자유 입력)
@@ -75,13 +73,13 @@ async def chat(req: ChatRequest, st: AppState = Depends(get_state)):
             vals = state.values
             for e in vals.get("errors") or []:
                 yield _sse("error", {"code": "PARTIAL", "message": e, "partial": True})
+            if (tb := budget.token_budget_event(usage)):
+                yield _sse("error", tb)
             ans = vals.get("answer")
             yield _sse("final", {"answer": ans.model_dump(mode="json") if ans else None,
                                  "cost_usd": round(usage.cost_usd, 5)})
         except Exception as e:  # noqa: BLE001
             log.exception("chat 실패")
-            code = "DART_LIMIT" if isinstance(e, DartLimit) else "BUDGET" if isinstance(e, budget.BudgetExceeded) \
-                else "INTERNAL"
-            yield _sse("error", {"code": code, "message": f"{type(e).__name__}: {e}", "partial": False})
+            yield _sse("error", {"code": error_code(e), "message": f"{type(e).__name__}: {e}", "partial": False})
 
     return StreamingResponse(gen(), media_type="text/event-stream")

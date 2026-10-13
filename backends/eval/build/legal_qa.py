@@ -54,7 +54,7 @@ async def main() -> None:
     c = load_corpus()
     r = rng()
     arts = [a for a in c.articles.values() if sum(len(p.text) for p in a.paragraphs) > 120 and a.no > 2]
-    edges, _ = build_edges([(a.key.split(":")[0], a) for a in c.articles.values()], set(c.articles) | set(c.annexes))
+    edges, _ = build_edges([(a.key.split(":")[0], a) for a in c.articles.values()], set(c.articles) | set(c.annexes), c.delegations)
     cross = [e for e in edges if e.dst in c.articles and e.src.split(":")[0] != e.dst.split(":")[0]]
     seen: set[tuple] = set()
     picks: list[tuple[str, list]] = []

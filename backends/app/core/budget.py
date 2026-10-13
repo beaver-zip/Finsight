@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import contextvars
 from dataclasses import dataclass, field
-from decimal import Decimal
 
 from app.core.cache import get_cache
 from app.settings import get_settings
@@ -96,6 +95,7 @@ class RequestUsage:
     cost_usd: float = 0.0
     calls: int = 0
     by_service: dict[str, float] = field(default_factory=dict)
+    exceeded: bool = False          # 토큰 상한에 걸려 LLM 호출을 멈춘 적이 있다(노드가 예외를 삼켜도 남는다)
 
 
 _request_usage: contextvars.ContextVar[RequestUsage | None] = contextvars.ContextVar(
@@ -106,10 +106,6 @@ def start_request() -> RequestUsage:
     u = RequestUsage()
     _request_usage.set(u)
     return u
-
-
-def current_request() -> RequestUsage | None:
-    return _request_usage.get()
 
 
 def add_request_usage(service: str, tokens: int, cost: float) -> None:
@@ -125,8 +121,14 @@ def add_request_usage(service: str, tokens: int, cost: float) -> None:
 def check_request_tokens() -> None:
     u = _request_usage.get()
     if u is not None and u.tokens >= get_settings().request_token_budget:
+        u.exceeded = True
         raise TokenBudgetExceeded(f"요청 토큰 {u.tokens} ≥ {get_settings().request_token_budget}")
 
 
-def to_decimal(x: float) -> Decimal:
-    return Decimal(str(round(x, 6)))
+def token_budget_event(u: RequestUsage | None) -> dict | None:
+    """상한에 걸린 요청이면 SSE error(TOKEN_BUDGET) 내용. 결과는 그때까지 만든 것만 담긴다."""
+    if u is None or not u.exceeded:
+        return None
+    return {"code": "TOKEN_BUDGET", "partial": True,
+            "message": f"요청 하나의 Claude 토큰이 상한({get_settings().request_token_budget:,})을 넘어 이후 LLM 호출을 멈췄습니다"}
+

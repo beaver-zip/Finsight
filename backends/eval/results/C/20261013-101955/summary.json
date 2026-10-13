@@ -1,0 +1,47 @@
+{
+ "config": "C",
+ "suite": "agent",
+ "split": "test",
+ "params": {
+  "split": "test"
+ },
+ "metrics": {
+  "calls": {
+   "mean": 13.833333333333334,
+   "lo": 10.166666666666666,
+   "hi": 17.833333333333332,
+   "n": 6
+  },
+  "checklist_rate": {
+   "mean": 0.7999999999999999,
+   "lo": 0.4666666666666666,
+   "hi": 1.0,
+   "n": 6
+  },
+  "success": {
+   "mean": 0.6666666666666666,
+   "lo": 0.3333333333333333,
+   "hi": 1.0,
+   "n": 6
+  },
+  "tool_valid": {
+   "mean": 1.0,
+   "lo": 1.0,
+   "hi": 1.0,
+   "n": 6
+  }
+ },
+ "meta": {
+  "judge": "google/gemini-2.5-flash (임시 judge)",
+  "human_recheck": "무작위 10과업은 사람이 재판정한다(eval/datasets/agent_recheck.v1.jsonl)",
+  "ops": {
+   "latency_p50_s": 182.79,
+   "latency_p95_s": 280.21,
+   "cost_total_usd": 0.1215,
+   "cost_per_item_usd": 0.02025,
+   "errors": 0
+  },
+  "n_items": 6
+ },
+ "runs": "1회 실행"
+}

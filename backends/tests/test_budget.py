@@ -39,3 +39,18 @@ async def test_cache_ttl(temp_cache):
     assert await temp_cache.get("ns", "k") is None
     await temp_cache.set("ns", "k", {"a": 1})
     assert await temp_cache.get("ns", "k") == {"a": 1}
+
+
+def test_request_token_cap(monkeypatch):
+    from app.api.report import error_code
+    monkeypatch.setattr(get_settings(), "request_token_budget", 1_000)
+    u = budget.start_request()
+    budget.add_request_usage("anthropic", 600, 0.001)
+    budget.check_request_tokens()
+    assert budget.token_budget_event(u) is None
+    budget.add_request_usage("anthropic", 600, 0.001)
+    with pytest.raises(budget.TokenBudgetExceeded) as e:
+        budget.check_request_tokens()
+    ev = budget.token_budget_event(u)
+    assert u.exceeded and ev["code"] == "TOKEN_BUDGET" and ev["partial"] and "1,000" in ev["message"]
+    assert error_code(e.value) == "TOKEN_BUDGET"

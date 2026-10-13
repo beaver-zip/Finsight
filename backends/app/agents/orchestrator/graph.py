@@ -288,8 +288,7 @@ STATE_TYPES = [("app.agents.orchestrator.router", "Route"), ("app.agents.orchest
                ("app.agents.orchestrator.graph", "FinalAnswer"), ("app.agents.orchestrator.subagents", "EvidencePart")]
 STATE_TYPES += [("app.domain.models", n) for n in
                 ("SubResult", "LegalAnswer", "LegalPoint", "CitedSpan", "Claim", "Citation", "VerificationResult",
-                 "VerificationIssue", "CorpProfile", "Metric", "SourceRef", "NewsItem", "ArticleAnalysis",
-                 "PdfLocation")]
+                 "VerificationIssue", "CorpProfile", "Metric", "SourceRef", "NewsItem", "ArticleAnalysis")]
 
 
 def serializer():

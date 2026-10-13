@@ -10,6 +10,7 @@ type Props = {
 
 export function TriggerModal({ files, onTriggerSuccess }: Props) {
   const [isProcessing, setIsProcessing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleTrigger = async () => {
     setIsProcessing(true);
@@ -23,10 +24,19 @@ export function TriggerModal({ files, onTriggerSuccess }: Props) {
         body: JSON.stringify({ file_name: files.map((f) => f.name) }),
       });
       const data = await response.json();
-      console.log("업로드 응답 데이터:", data);
-      onTriggerSuccess(); // 업로드 성공 시 부모 컴포넌트에 알림
+      if (!response.ok) {
+        setError(data.detail ?? `적재 실패(HTTP ${response.status})`);
+        return;
+      }
+      const failed: { file_name: string; reason: string }[] = data.failed ?? [];
+      if ((data.registered ?? []).length === 0) {
+        setError(failed.map((f) => f.reason).join("\n") || "적재된 문서가 없습니다");
+        return;
+      }
+      onTriggerSuccess(); // 한 개 이상 적재되면 다음 단계
     } catch (err) {
-      console.error("파일 업로드에 실패했습니다:", err);
+      setError("서버에 연결하지 못했습니다");
+      console.error("적재 요청 실패:", err);
     } finally {
       setIsProcessing(false);
     }
@@ -38,7 +48,7 @@ export function TriggerModal({ files, onTriggerSuccess }: Props) {
         벡터 DB에 저장
       </h2>
       <p className="mb-4 text-[13.5px] leading-relaxed text-ink-500">
-        {files.length}개 문서를 조문 단위로 청크로 나눈 뒤 bge-m3 임베딩을 생성해
+        {files.length}개 문서를 조문 단위로 나눠 법령 검색에 함께 쓰이도록
         저장합니다. 문서 길이에 따라 수십 초가 걸릴 수 있습니다.
       </p>
       <Button
@@ -46,6 +56,7 @@ export function TriggerModal({ files, onTriggerSuccess }: Props) {
         onClick={handleTrigger}
         disabled={isProcessing}
       />
+      {error && <p className="mt-3 whitespace-pre-line text-[13px] text-red-600">{error}</p>}
     </div>
   );
 }

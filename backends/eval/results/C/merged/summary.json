@@ -1,0 +1,38 @@
+{
+ "config": "C",
+ "suite": "agent",
+ "split": "all",
+ "params": {
+  "split": "test"
+ },
+ "metrics": {
+  "calls": {
+   "mean": 17.1,
+   "lo": 14.4,
+   "hi": 19.702499999999997,
+   "n": 10
+  },
+  "checklist_rate": {
+   "mean": 0.9200000000000002,
+   "lo": 0.86,
+   "hi": 0.9800000000000001,
+   "n": 10
+  },
+  "success": {
+   "mean": 0.6,
+   "lo": 0.3,
+   "hi": 0.9,
+   "n": 10
+  },
+  "tool_valid": {
+   "mean": 1.0,
+   "lo": 1.0,
+   "hi": 1.0,
+   "n": 10
+  }
+ },
+ "meta": {
+  "merged_items": 10
+ },
+ "runs": "1회 실행"
+}

@@ -62,6 +62,7 @@ class Inputs:
     news: list[NewsItem]
     disclosures: list[Disclosure]
     industry: str = "general"
+    segment_source: str = "정기보고서 사업부문별 요약 재무 현황(내부거래 포함)"
 
 
 def make_inputs(corp: CorpProfile, today: date, filing: PeriodicFiling, col: Any, *, consensus: Consensus | None = None,
@@ -71,7 +72,8 @@ def make_inputs(corp: CorpProfile, today: date, filing: PeriodicFiling, col: Any
                   shares=col.shares, splits=col.splits, dividends=col.dividends, buybacks=col.buybacks, px=col.px,
                   index_px=col.index_px, index_name=col.index_name, pref_px=col.pref_px,
                   prelim_firsts=col.prelim_firsts, segments=col.segments, peers=col.peers, consensus=consensus,
-                  news=list(news or []), disclosures=list(disclosures or []), industry=col.industry)
+                  news=list(news or []), disclosures=list(disclosures or []), industry=col.industry,
+                  segment_source=col.segment_source or Inputs.segment_source)
 
 
 @dataclass
@@ -268,7 +270,7 @@ def _growth(cur: float | None, base: float | None) -> float | None:
 
 
 def _latest(c: dict) -> None:
-    F, data, rows, by_all, L, pre = c["F"], c["data"], c["rows"], c["by_all"], c["L"], c["pre"]
+    F, data, by_all, L, pre = c["F"], c["data"], c["by_all"], c["L"], c["pre"]
     if L is None:
         return
     y, q = L.year, L.q
@@ -403,7 +405,7 @@ def _op_chart(c: dict) -> None:
 
 # ---------------- 영업이익률 이력(대표 차트)
 def _opm_history(c: dict) -> None:
-    F, data, rows, L = c["F"], c["data"], c["rows"], c["L"]
+    F, data, rows = c["F"], c["data"], c["rows"]
     ser = [(r.key, f(r.operating_income) / f(r.revenue) * 100) for r in rows
            if r.revenue and r.operating_income is not None and f(r.revenue) > 0]
     if len(ser) < 8 or c["inp"].industry == "financial":
@@ -466,9 +468,17 @@ def _annual(c: dict) -> None:
     for y in years:
         cu = inp.cum[(y, 4)]
         rev, op = f(cu.get("revenue")), None
+        # 연간 값은 사업보고서 값을 쓴다. 분기 값의 합은 분기 보고서 사이 정정이 있으면 연간 값과 어긋난다
+        # (2026-10-13 리포트 평가: 경보제약·현대약품 순이익). 없을 때만 분기 합.
         r4 = [by.get(qkey(y, q)) for q in (1, 2, 3, 4)]
-        op = sum(f(r.operating_income) for r in r4) if all(r and r.operating_income is not None for r in r4) else None
-        ni = sum(f(r.net_income_owners) for r in r4) if all(r and r.net_income_owners is not None for r in r4) else None
+        op = f(cu.get("operating_income"))
+        if op is None and all(r and r.operating_income is not None for r in r4):
+            op = sum(f(r.operating_income) for r in r4)
+        ni = f(cu.get("net_income_owners"))
+        if ni is None and cu.get("fs_div") == "OFS":          # 별도 재무제표에는 지배주주 귀속 구분이 없다
+            ni = f(cu.get("net_income"))
+        if ni is None and all(r and r.net_income_owners is not None for r in r4):
+            ni = sum(f(r.net_income_owners) for r in r4)
         sh = _shares_at(inp, (y, 4))
         dv = inp.dividends.get(y)
         eps = dv.eps if dv and dv.eps else (ni / sh if ni is not None and sh else None)
@@ -629,9 +639,8 @@ def _segments(c: dict) -> None:
     total_op = f(next(r for r in rows if r.key == last).operating_income)
     share = seg_last[main]["op"] / total_op * 100 if total_op and total_op > 0 else None
     yago = qkey(int("20" + last[2:4]) - 1, int(last[0]))
-    lk = per_label(last)
     F.add("seg1_op", last, f"{short(main)} 부문 영업이익({last})", fmt.money(seg_last[main]["op"]), seg_last[main]["op"], "KRW",
-          source="정기보고서 사업부문별 요약 재무 현황(내부거래 포함)")
+          source=inp.segment_source)
     if share is not None:
         F.add("seg1_share", last, f"{short(main)} 부문 영업이익 ÷ 전사 영업이익({last})", fmt.pct(share), share, "%")
     if seg_last[main]["rev"]:
@@ -675,8 +684,9 @@ def _segments(c: dict) -> None:
         qk = t["heads"]
         div = data.table_div
         segrow = lambda n, k: [fmt.tbl(segq[q][n][k], div) if q in segq else "–" for q in qk]
-        rev_sub = [{"head": short(n), "cells": segrow(n, "rev"), "sub": True, "tip": "부문 간 내부거래 포함"} for n in (main, second)]
-        op_sub = [{"head": short(n), "cells": segrow(n, "op"), "sub": True, "tip": "부문 간 내부거래 포함"} for n in [main, second] + others]
+        tip = "부문 간 내부거래 포함" if "내부거래 포함" in inp.segment_source else "연결재무제표 주석 영업부문 정보 기준"
+        rev_sub = [{"head": short(n), "cells": segrow(n, "rev"), "sub": True, "tip": tip} for n in (main, second)]
+        op_sub = [{"head": short(n), "cells": segrow(n, "op"), "sub": True, "tip": tip} for n in [main, second] + others]
         t["rows"] = [t["rows"][0]] + rev_sub + [t["rows"][1]] + op_sub + t["rows"][2:]
     c["segq"] = segq
 
@@ -744,9 +754,9 @@ def _valuation(c: dict) -> None:
     if bmax is not cur and band.index(bmax) >= len(band) - 24:
         F.add("px_since_peak", "hist", f"PBR 최고 시점({fmt.ym(bmax['d'])}) 이후 주가 변화", fmt.move((cur["p"] / bmax["p"] - 1) * 100),
               (cur["p"] / bmax["p"] - 1) * 100, "%")
-        F.add("bps_since_peak", "hist", f"같은 기간 BPS 변화", fmt.change((cur["bps"] / bmax["bps"] - 1) * 100),
+        F.add("bps_since_peak", "hist", "같은 기간 BPS 변화", fmt.change((cur["bps"] / bmax["bps"] - 1) * 100),
               (cur["bps"] / bmax["bps"] - 1) * 100, "%")
-        F.add("pbr_since_peak", "hist", f"같은 기간 PBR 변화", fmt.move((cur["pbr"] / bmax["pbr"] - 1) * 100, 0),
+        F.add("pbr_since_peak", "hist", "같은 기간 PBR 변화", fmt.move((cur["pbr"] / bmax["pbr"] - 1) * 100, 0),
               (cur["pbr"] / bmax["pbr"] - 1) * 100, "%")
         title = f"PBR은 {bmin['pbr']:.2f}배에서 {bmax['pbr']:.2f}배까지 오른 뒤 {cur['pbr']:.2f}배" if band.index(bmin) < band.index(bmax) \
             else f"PBR {cur['pbr']:.2f}배, {first_year}년 이후 {pos_txt}"
@@ -1022,7 +1032,7 @@ def _events(c: dict) -> None:
 
 # ---------------- 1년 주가
 def _rel(c: dict) -> None:
-    inp, F, data = c["inp"], c["F"], c["data"]
+    inp, data = c["inp"], c["data"]
     px, ix = inp.px, inp.index_px
     if not px or not ix:
         return

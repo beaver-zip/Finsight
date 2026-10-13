@@ -32,13 +32,6 @@ class Shares:
     def total_out(self) -> int:
         return self.common_out + self.pref_out
 
-    def scaled(self, k: float) -> "Shares":
-        """액면분할 이전 수치를 현재 기준으로 환산."""
-        f = lambda v: int(round(v * k))
-        return Shares(self.year, self.reprt_code, f(self.common_issued), f(self.pref_issued), f(self.common_treasury),
-                      f(self.pref_treasury), f(self.common_out), f(self.pref_out), self.rcept_no)
-
-
 async def _json(dart: DartClient, endpoint: str, corp_code: str, year: int, rc: str) -> list[dict] | None:
     cache = get_cache()
     key = f"{endpoint}:{corp_code}:{year}:{rc}"
@@ -58,7 +51,7 @@ async def share_counts(dart: DartClient, corp_code: str, year: int, rc: str) -> 
     if not rows:
         return None
     ci = pi = ct = pt = co = po = 0
-    seen_c = seen_p = False
+    seen_c = False
     for r in rows:
         se = (r.get("se") or "").replace("\n", "").replace(" ", "")
         if "합계" in se or "비고" in se:
@@ -67,7 +60,7 @@ async def share_counts(dart: DartClient, corp_code: str, year: int, rc: str) -> 
         if not out and issued:
             out = issued - tre
         if "우선" in se or "의결권없는" in se or "종류" in se:
-            pi, pt, po, seen_p = pi + issued, pt + tre, po + out, True
+            pi, pt, po = pi + issued, pt + tre, po + out
         elif "보통" in se or "의결권있는" in se:
             ci, ct, co, seen_c = ci + issued, ct + tre, co + out, True
     if not seen_c or ci <= 0:

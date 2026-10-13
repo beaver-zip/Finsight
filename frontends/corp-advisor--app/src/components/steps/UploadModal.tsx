@@ -12,6 +12,7 @@ export function UploadModal({ onUploadSuccess }: UploadModalProps) {
   // 파일 업로드
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   const handleUpload = async () => {
     if (uploadedFiles.length === 0) {
@@ -27,15 +28,20 @@ export function UploadModal({ onUploadSuccess }: UploadModalProps) {
     });
     const fileNames = uploadedFiles.map((file) => file.name).join(", ");
     console.log("업로드할 파일들:", fileNames);
-    // API 호출이 성공했다고 가정하고, 1.5초 후 다음 단계로 이동
-    try {
+        try {
       const response = await fetch(`${BASE_URL}/files/upload-pdf`, {
         method: "POST",
         body: formData,
       });
       const data = await response.json();
-      console.log("업로드 응답 데이터:", data);
-      onUploadSuccess(uploadedFiles); // 업로드 성공 시 부모 컴포넌트에 알림
+      const body = response.ok ? data : data.detail ?? {};
+      const accepted: string[] = body.uploaded ?? [];
+      const rejected: { file: string; reason: string }[] = body.rejected ?? [];
+      setUploadError(rejected.map((r) => r.reason).join("\n") || null);
+      if (accepted.length > 0) {
+        // 서버가 받아 준 파일만 다음 단계(벡터 적재)로 넘긴다
+        onUploadSuccess(uploadedFiles.filter((f) => accepted.includes(f.name)));
+      }
     } catch (err) {
       console.error("파일 업로드에 실패했습니다:", err);
     } finally {
@@ -59,6 +65,9 @@ export function UploadModal({ onUploadSuccess }: UploadModalProps) {
         onClick={handleUpload}
         disabled={isUploading || uploadedFiles.length === 0}
       />
+      {uploadError && (
+        <p className="mt-3 whitespace-pre-line text-[13px] text-red-600">{uploadError}</p>
+      )}
     </>
   );
 }

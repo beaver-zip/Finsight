@@ -41,16 +41,6 @@ def display(m: Metric) -> str:
     return f"{s}({m.note})" if m.note else s
 
 
-def facts_table(metrics: dict[str, Metric]) -> list[dict]:
-    """결론 노드에 주는 사실표. 값이 있거나 note가 있는 지표만."""
-    rows = []
-    for m in metrics.values():
-        if m.value is None and not m.note:
-            continue
-        rows.append({"id": m.slot_id, "label": f"{m.label}({m.period})", "display": display(m)})
-    return rows
-
-
 def slots_in(text: str) -> list[str]:
     return SLOT.findall(text)
 

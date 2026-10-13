@@ -144,8 +144,8 @@ export function ChatForm({
                         <button
                           type="button"
                           aria-label={`${file.file_name} 삭제`}
-                          onClick={() => {
-                            deleteFile(file.file_name);
+                          onClick={async () => {
+                            await deleteFile(file.file_name); // 삭제가 끝난 뒤 목록을 다시 읽는다
                             handleFileDelete(file.file_name);
                           }}
                           className="shrink-0 rounded p-1 text-ink-300 opacity-0 transition-opacity hover:bg-red-50 hover:text-red-500 group-hover:opacity-100"

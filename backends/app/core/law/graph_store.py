@@ -84,9 +84,12 @@ class LawGraph:
                         "to_item: r.to_item, source: 'regex'}]->(b)", rows=ref)
         dlg = [e.__dict__ for e in edges if e.kind == "DELEGATES_TO"]
         await self._run("UNWIND $rows AS r MATCH (a:Article {key: r.src}), (b:Article {key: r.dst}) "
-                        "CREATE (a)-[:DELEGATES_TO {phrase: r.phrase, source: 'regex'}]->(b)", rows=dlg)
+                        "CREATE (a)-[:DELEGATES_TO {phrase: r.phrase, source: r.source}]->(b)", rows=dlg)
         cnt = await self._run("MATCH ()-[r]->() RETURN type(r) AS t, count(*) AS n")
-        return {c["t"]: c["n"] for c in cnt}
+        out = {c["t"]: c["n"] for c in cnt}
+        for src in ("regex", "api", "both"):
+            out[f"DELEGATES_TO.{src}"] = sum(1 for e in dlg if e["source"] == src)
+        return out
 
     # ---------- 검색
     async def expand(self, seed_keys: list[str], hops: int = 1, limit: int = 50) -> list[Expanded]:

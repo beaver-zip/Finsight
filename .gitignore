@@ -30,3 +30,6 @@ CLAUDE.local.md
 docs/eval_review.md
 docs/LOCAL_SETUP.md
 docs/design.md
+
+# 사용자가 올린 문서
+backends/data/uploads/

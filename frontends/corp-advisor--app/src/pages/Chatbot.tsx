@@ -4,6 +4,8 @@ import { useNavigate } from "react-router-dom";
 import { ChevronLeft, Sparkles, RotateCcw } from "lucide-react";
 
 import { ChatForm } from "../components/ChatForm";
+import { Modal } from "../components/steps/Modal";
+import { useCollectionFiles } from "../hooks/useCollectionFiles";
 import { Bubble } from "../components/Bubble";
 import { LoadingSpinner } from "../components/LoadingSpinner";
 import type { Message } from "../ChatContext";
@@ -23,12 +25,24 @@ function Chatbot() {
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState("");
-  const [typingTextMap, setTypingTextMap] = useState<{
-    [id: number]: { answer: string; cites?: any[] };
-  }>({});
+  const [typingTextMap, setTypingTextMap] = useState<{ [id: number]: string }>({});
   const [queryMode, setQueryMode] = useState<QueryMode>("auto");
   const [awaitingResume, setAwaitingResume] = useState(false);
   const { send, isLoading, resetThread } = useChatStream();
+
+  // 지식베이스(사용자가 올린 내규 PDF): 업로드 → 벡터 적재 → 목록·삭제
+  const { files: collectionFiles, refetch: refetchCollectionFiles } = useCollectionFiles();
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [currentStep, setCurrentStep] = useState(1);
+  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const openModal = () => {
+    setCurrentStep(1);
+    setIsModalOpen(true);
+  };
+  const closeModal = () => {
+    setIsModalOpen(false);
+    refetchCollectionFiles();
+  };
 
   const chatEndRef = useRef<null | HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -38,9 +52,8 @@ function Chatbot() {
     const entries = Object.entries(typingTextMap);
     if (entries.length === 0) return;
     const intervals: ReturnType<typeof setInterval>[] = [];
-    entries.forEach(([idStr, data]) => {
+    entries.forEach(([idStr, fullText]) => {
       const id = Number(idStr);
-      const fullText = data.answer ?? "";
       const step = Math.max(2, Math.ceil(fullText.length / 220));
       let charIndex = 0;
       const intervalId = setInterval(() => {
@@ -54,7 +67,7 @@ function Chatbot() {
           clearInterval(intervalId);
           setMessages((prev) =>
             prev.map((msg) =>
-              msg.id === id ? { ...msg, isStreaming: false, type: "answer", cites: data.cites } : msg,
+              msg.id === id ? { ...msg, isStreaming: false, type: "answer" } : msg,
             ),
           );
           setTypingTextMap((prev) => {
@@ -101,6 +114,7 @@ function Chatbot() {
     setInputValue("");
     setAwaitingResume(false);
 
+    let cut = false; // 요청 토큰 상한에 걸려 일부 단계를 건너뛴 답
     send(
       { ...body, mode: queryMode },
       {
@@ -119,10 +133,13 @@ function Chatbot() {
           // 출처는 답변 마크다운 끝의 번호 목록(본문 [1]과 같은 번호)에 있으므로 따로 패널을 띄우지 않는다
           setTypingTextMap((prev) => ({
             ...prev,
-            [aid]: { answer: answer?.markdown ?? "답변을 만들지 못했습니다.", cites: [] },
+            [aid]:
+              (answer?.markdown ?? "답변을 만들지 못했습니다.") +
+              (cut ? "\n\n> 요청 하나에 쓸 수 있는 토큰을 넘어 일부 단계를 건너뛰었습니다." : ""),
           }));
         },
-        onError: (message, partial) => {
+        onError: (message, partial, code) => {
+          if (code === "TOKEN_BUDGET") cut = true;
           if (partial) return; // 일부 단계 실패는 최종 답에 반영돼 있다
           setMessages((prev) =>
             prev.map((m) =>
@@ -175,9 +192,10 @@ function Chatbot() {
       onChange={(e) => setInputValue(e.target.value)}
       onKeyDown={handleKeyDown}
       onClick={handleSubmit}
-      handleOpenModal={() => {}}
-      collectionFiles={[]}
-      handleFileDelete={() => {}}
+      handleOpenModal={openModal}
+      collectionFiles={collectionFiles}
+      handleFileDelete={() => refetchCollectionFiles()}
+      showKnowledgeBase
       hasMessages={hasMessages}
       isLoading={isLoading}
       queryMode={queryMode}
@@ -211,19 +229,29 @@ function Chatbot() {
         </div>
       </header>
 
+      {isModalOpen && (
+        <Modal
+          currentStep={currentStep}
+          uploadedFiles={uploadedFiles}
+          onClose={closeModal}
+          onUploadSuccess={(files) => {
+            setUploadedFiles(files);
+            setCurrentStep(2);
+          }}
+          onTriggerSuccess={() => {
+            setCurrentStep(3);
+            refetchCollectionFiles();
+          }}
+        />
+      )}
+
       {hasMessages ? (
         <div className="flex min-h-0 flex-1 flex-col">
           <main className="min-h-0 flex-1 overflow-y-auto py-6">
             <div className={`${columnClass} flex flex-col gap-6`}>
               {messages.map((msg) => (
                 <div key={msg.id}>
-                  <Bubble
-                    isLoading={isLoading}
-                    onCiteClick={() => {}}
-                    isQuestion={msg.type === "question"}
-                    cites={msg.cites || []}
-                    msg={msg}
-                  />
+                  <Bubble isQuestion={msg.type === "question"} msg={msg} />
                   {msg.options && msg.options.length > 0 && (
                     <div className="ml-10 mt-2 flex flex-wrap gap-2">
                       {msg.options.map((opt) => (
