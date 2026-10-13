@@ -33,7 +33,7 @@ async def ingest(*, fetch: bool = True, graph: bool = True, vectors: bool = True
     corpus = load_corpus()
     if graph:
         pairs = [(a.key.split(":")[0], a) for a in corpus.articles.values()]
-        edges, outside = build_edges(pairs, set(corpus.articles) | set(corpus.annexes))
+        edges, outside = build_edges(pairs, set(corpus.articles) | set(corpus.annexes), corpus.delegations)
         g = LawGraph()
         try:
             await g.reset()

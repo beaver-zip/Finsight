@@ -14,6 +14,7 @@ import logging
 
 from app.agents.legal.tools import LawTools, doc_text, short_name
 from app.core import llm
+from app.domain.annex_table import split_annex
 from app.domain.models import Annex, Article, ArticleHit, CitedSpan, LegalAnswer, LegalPoint
 
 SYSTEM = """너는 전자금융 법령을 조사해 답하는 법무 리서처다. 함께 준 조문만 근거로 한국어로 답한다.
@@ -33,13 +34,7 @@ ADMRUL_URL = "https://www.law.go.kr/행정규칙/{name}"
 
 def _blocks(doc: Article | Annex) -> list[str]:
     if isinstance(doc, Annex):
-        out, buf = [], ""
-        for line in doc.text.split("\n"):
-            if buf and len(buf) + len(line) + 1 > 1000:
-                out.append(buf)
-                buf = ""
-            buf = f"{buf}\n{line}" if buf else line
-        return out + ([buf] if buf else [])
+        return split_annex(doc.text, 1000)      # 표는 행 단위로, 조각마다 머리 행
     return [p.text for p in doc.paragraphs]
 
 

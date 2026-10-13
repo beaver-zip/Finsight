@@ -14,6 +14,7 @@ from weaviate.classes.config import Configure, DataType, Property, Tokenization
 from weaviate.classes.query import Filter, HybridFusion, MetadataQuery
 
 from app.core.embeddings import embed
+from app.domain.annex_table import split_annex
 from app.domain.models import Annex, Article
 from app.settings import get_settings
 
@@ -54,16 +55,10 @@ def article_chunks(a: Article) -> list[Chunk]:
 
 
 def annex_chunks(x: Annex, level: str) -> list[Chunk]:
+    """별표는 ANNEX_CHUNK자 이하로 자른다. 표는 행 단위로 자르고 조각마다 표 머리 행을 붙인다."""
     no = x.key.split(":annex-")[-1].replace("-", "의")
     h = f"[{x.law_name}] [별표 {no}] {x.title}"
-    out, buf = [], ""
-    for line in x.text.split("\n"):
-        if buf and len(buf) + len(line) + 1 > ANNEX_CHUNK:
-            out.append(buf)
-            buf = ""
-        buf = f"{buf}\n{line}" if buf else line
-    if buf:
-        out.append(buf)
+    out = split_annex(x.text, ANNEX_CHUNK)
     return [Chunk(f"{x.key}:c{i}", x.key, x.law_name, level, "lawgo", h, t) for i, t in enumerate(out)]
 
 

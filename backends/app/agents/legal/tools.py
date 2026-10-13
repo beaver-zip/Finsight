@@ -11,6 +11,7 @@ from app.core.law.corpus import Corpus, load_corpus
 from app.core.law.graph_store import LawGraph
 from app.core.law.vector_store import LawVectors, heading_of
 from app.core.reranker import rerank
+from app.domain.annex_table import table_blocks
 from app.domain.models import Annex, Article, ArticleHit
 
 # 약칭 → 정식 명칭(질의 정규화)
@@ -49,9 +50,19 @@ def focus_text(doc: Article | Annex, query: str, max_chars: int = 1500) -> str:
     """리랭크 입력: 긴 조문은 질문과 글자 2-gram이 많이 겹치는 항부터 넣는다(리랭커는 앞 512토큰만 본다).
     정의 조항(법 제2조)처럼 긴 조문이 앞부분만 보고 낮은 점수를 받던 문제를 줄인다."""
     full = doc_text(doc)
-    if len(full) <= max_chars or isinstance(doc, Annex):
-        return full[:max_chars]
+    if len(full) <= max_chars:
+        return full
     q = _bigrams(query)
+    if isinstance(doc, Annex):              # 긴 별표: 표 머리 행 + 질문과 겹치는 행부터
+        out = f"[{doc.law_name}] {doc.title}"
+        for head, lines in table_blocks(doc.text):
+            if head and len(out) + len(head) + 1 <= max_chars:
+                out += "\n" + head
+            for ln in sorted(lines, key=lambda ln: -len(q & _bigrams(ln))):
+                if len(out) + len(ln) + 1 > max_chars:
+                    break
+                out += "\n" + ln
+        return out
     paras = sorted(doc.paragraphs, key=lambda p: -len(q & _bigrams(p.text)))
     out = heading_of(doc)
     for p in paras:

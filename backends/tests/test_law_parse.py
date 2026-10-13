@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from app.core.law.parser import clean, parse, split_paragraphs
-from app.domain.citations import ACT, DECREE, REG, RULE, delegates, find_refs
+from app.domain.citations import ACT, DECREE, REG, RULE, Edge, build_edges, delegation_phrase, find_refs
 
 FIX = Path(__file__).parent / "fixtures" / "lawgo"
 
@@ -91,7 +91,47 @@ def test_corpus_refs_all_resolve(docs):
 
 
 def test_delegation_phrases():
-    assert delegates(ACT, DECREE, "자격요건 등에 필요한 사항은 대통령령으로 정한다")
-    assert delegates(DECREE, REG, "그 밖에 필요한 사항은 금융위원회가 정하여 고시한다")
-    assert delegates(REG, RULE, "세부기준은 감독원장이 정한다")
-    assert not delegates(ACT, DECREE, "금융위원회가 정하는")
+    assert delegation_phrase(DECREE, "자격요건 등에 필요한 사항은 대통령령으로 정한다") == "대통령령으로 정한"
+    assert delegation_phrase(REG, "그 밖에 필요한 사항은 금융위원회가 정하여 고시한다")
+    assert delegation_phrase(RULE, "세부기준은 감독원장이 정한다")
+    assert delegation_phrase(DECREE, "금융위원회가 정하는") is None
+
+
+def test_parse_delegations_api():
+    from app.core.law.parser import parse_delegations
+    act = parse_delegations((FIX / "delegated_act.xml").read_text(), ACT)
+    assert act and not any(d["kind"] == "인용법령" for d in act)
+    d = next(x for x in act if x["src"] == "전자금융거래법:21-2" and x["dst"])
+    assert d["dst_law"] == DECREE and d["dst"].startswith(DECREE + ":11-4")
+    assert any(x["kind"] == "위임행정규칙" and x["dst"] is None and x["dst_law"] == REG for x in act)
+    dec = parse_delegations((FIX / "delegated_decree.xml").read_text(), DECREE)
+    assert dec and all(x["dst_law"] == REG and x["dst"] is None for x in dec)
+
+
+def test_build_edges_merges_api_delegations():
+    from app.domain.models import Article, Paragraph
+    def A(law, no, text):
+        lv = {ACT: "법률", DECREE: "시행령", REG: "고시"}[law]
+        return law, Article(key=f"{law}:{no}", law_id="1", law_name=law, level=lv, no=no, title="",
+                            paragraphs=[Paragraph(key=f"{law}:{no}:p1", no=1, text=text)])
+    arts = [A(ACT, 5, "필요한 사항은 대통령령으로 정한다."),
+            A(ACT, 6, "세부 사항은 대통령령으로 정한다."),
+            A(DECREE, 3, "법 제5조에 따른 사항은 다음과 같다."),          # 정규식이 찾는 쌍
+            A(DECREE, 9, "기록의 보존 기간은 5년으로 한다."),               # 법 제6조를 참조하지 않아 정규식은 못 찾는다
+            A(DECREE, 4, "필요한 사항은 금융위원회가 정한다."),
+            A(REG, 2, "영 제4조에 따라 다음 각 호를 정한다."),
+            A(ACT, 2, "이 법에서 쓰는 용어 중 전자화폐는 대통령령이 정하는 기준을 충족하는 것을 말한다."),
+            A(DECREE, 7, "법 제2조에 따른 전자화폐의 요건은 다음과 같다.")]          # 정의 조항 참조: API에 없어 뺀다
+    known = {a.key for _, a in arts}
+    api = [{"src": f"{ACT}:5", "dst_law": DECREE, "dst": f"{DECREE}:3", "kind": "시행령", "phrase": "", "clause": ""},
+           {"src": f"{ACT}:6", "dst_law": DECREE, "dst": f"{DECREE}:9", "kind": "시행령", "phrase": "", "clause": ""},
+           {"src": f"{DECREE}:4", "dst_law": REG, "dst": None, "kind": "위임행정규칙", "phrase": "", "clause": ""}]
+    edges, _ = build_edges(arts, known, api)
+    dlg = {(e.src, e.dst): e.source for e in edges if e.kind == "DELEGATES_TO"}
+    assert dlg == {(f"{ACT}:5", f"{DECREE}:3"): "both", (f"{ACT}:6", f"{DECREE}:9"): "api",
+                   (f"{DECREE}:4", f"{REG}:2"): "both"}
+    assert any(e.kind == "REFERS_TO" and (e.src, e.dst) == (f"{DECREE}:7", f"{ACT}:2") for e in edges)
+    regex_only, _ = build_edges(arts, known)                  # API 정보가 없으면 정규식 결과를 그대로 쓴다
+    assert {e.source for e in regex_only if e.kind == "DELEGATES_TO"} == {"regex"}
+    assert (f"{ACT}:2", f"{DECREE}:7") in {(e.src, e.dst) for e in regex_only if e.kind == "DELEGATES_TO"}
+    assert all(isinstance(e, Edge) for e in edges)
