@@ -468,9 +468,17 @@ def _annual(c: dict) -> None:
     for y in years:
         cu = inp.cum[(y, 4)]
         rev, op = f(cu.get("revenue")), None
+        # 연간 값은 사업보고서 값을 쓴다. 분기 값의 합은 분기 보고서 사이 정정이 있으면 연간 값과 어긋난다
+        # (2026-10-13 리포트 평가: 경보제약·현대약품 순이익). 없을 때만 분기 합.
         r4 = [by.get(qkey(y, q)) for q in (1, 2, 3, 4)]
-        op = sum(f(r.operating_income) for r in r4) if all(r and r.operating_income is not None for r in r4) else None
-        ni = sum(f(r.net_income_owners) for r in r4) if all(r and r.net_income_owners is not None for r in r4) else None
+        op = f(cu.get("operating_income"))
+        if op is None and all(r and r.operating_income is not None for r in r4):
+            op = sum(f(r.operating_income) for r in r4)
+        ni = f(cu.get("net_income_owners"))
+        if ni is None and cu.get("fs_div") == "OFS":          # 별도 재무제표에는 지배주주 귀속 구분이 없다
+            ni = f(cu.get("net_income"))
+        if ni is None and all(r and r.net_income_owners is not None for r in r4):
+            ni = sum(f(r.net_income_owners) for r in r4)
         sh = _shares_at(inp, (y, 4))
         dv = inp.dividends.get(y)
         eps = dv.eps if dv and dv.eps else (ni / sh if ni is not None and sh else None)

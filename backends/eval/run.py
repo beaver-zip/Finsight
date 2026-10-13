@@ -1,6 +1,6 @@
 """평가 실행: 설정 하나 = 실험 하나.
 
-사용: cd backends && PYTHONPATH=. python -m eval.run --config L2 [--split dev|test|all] [--limit N]
+사용: cd backends && PYTHONPATH=. python -m eval.run --config L2 [--split dev|test|all] [--limit N] [--skip-done] [--ids a,b]
 결과: eval/results/<설정>/<타임스탬프>/items.jsonl, summary.json, summary.md(지표·95% CI·운영 지표)
 설정의 effort_override({작업: effort})는 그 실행 동안만 core.llm의 effort를 바꾼다(작업별 effort 탐색).
 """
@@ -41,6 +41,9 @@ async def main(args) -> None:
         done = {r["id"] for d in (RESULTS / cfg.id).glob("*/items.jsonl") for r in load_jsonl(d) if not r.get("error")} \
             if (RESULTS / cfg.id).exists() else set()
         items = [x for x in items if x["id"] not in done]
+    if args.ids:                       # 고친 뒤 몇 문항만 다시 잴 때(merge_runs는 같은 문항의 최근 실행을 쓴다)
+        want = set(args.ids.split(","))
+        items = [x for x in items if x["id"] in want]
     limit = args.limit or cfg.params.get("limit")
     if limit:
         items = items[:limit]
@@ -68,4 +71,5 @@ if __name__ == "__main__":
     ap.add_argument("--split")
     ap.add_argument("--limit", type=int)
     ap.add_argument("--skip-done", action="store_true", help="앞선 실행에서 끝난 문항은 건너뛴다")
+    ap.add_argument("--ids", help="이 문항만(쉼표로 구분)")
     asyncio.run(main(ap.parse_args()))

@@ -22,7 +22,7 @@ RC_Q = {v: k for k, v in RC.items()}
 FIRST_YEAR = 2016                  # OpenDART 분기 재무제표가 있는 첫해
 ORIGINAL_QUARTERS = 20             # 재무 API에 없는 분기를 원문에서 읽는 범위(최근 5년)
 PL_ITEMS = ("revenue", "operating_income", "net_income", "net_income_owners")
-CASH_ITEMS = ("revenue", "net_income", "cfo", "capex", "intangible_capex", "buyback", "dividends_paid",
+CASH_ITEMS = ("revenue", "operating_income", "net_income", "net_income_owners", "cfo", "capex", "intangible_capex", "buyback", "dividends_paid",
               "cash", "st_fin", "st_amort", "st_fvpl", "st_borrow", "cur_ltd", "bonds", "lt_borrow",
               "receivables", "inventory", "equity_owners")
 
@@ -173,5 +173,6 @@ async def cumulative_items(dart: DartClient, corp_code: str, periods: list[tuple
             continue
         row = {it: cum_value(s, it) for it in CASH_ITEMS}
         row["rcept_no"] = s.rcept_no
+        row["fs_div"] = s.fs_div
         out[(y, q)] = row
     return out
