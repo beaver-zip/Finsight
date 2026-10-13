@@ -1,0 +1,22 @@
+{
+ "config": "R",
+ "suite": "report",
+ "split": "dev",
+ "params": {
+  "max_new": 4
+ },
+ "metrics": {},
+ "meta": {
+  "judge": "google/gemini-2.5-flash (임시 judge)",
+  "note": "R1=첫 초안(검증 전), R2=검증·재작성 뒤. 수치는 2025 사업연도 주요계정과 대조",
+  "ops": {
+   "latency_p50_s": null,
+   "latency_p95_s": null,
+   "cost_total_usd": 0,
+   "cost_per_item_usd": 0,
+   "errors": 0
+  },
+  "n_items": 0
+ },
+ "runs": "1회 실행"
+}
