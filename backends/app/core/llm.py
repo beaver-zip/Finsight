@@ -12,8 +12,9 @@ import logging
 from typing import Any, Callable, Literal, TypeVar
 
 from anthropic import AsyncAnthropic
+from anthropic.lib._parse._transform import transform_schema
 from anthropic.types import Message
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from app.core import budget
 from app.core.cache import get_cache, make_key
@@ -115,10 +116,13 @@ async def structured(schema: type[T], messages: list[dict], *, role: Role = "def
 
     retried_content = retried_tokens = False
     last_err = ""
+    # SDK의 messages.parse()는 출력이 잘리면 stop_reason을 보기 전에 검증 오류를 던져 재시도·비용 기록이 빠진다
+    # (2026-10-13 복합 과업 ct-05). 스키마는 SDK와 같은 방식으로 넘기고 파싱은 여기서 한다.
+    fmt = {"type": "json_schema", "schema": transform_schema(TypeAdapter(schema).json_schema())}
     while True:
         await _guard()
         kwargs: dict[str, Any] = dict(model=model, max_tokens=max_tokens, messages=messages,
-                                      output_format=schema, output_config={"effort": effort})
+                                      output_config={"effort": effort, "format": fmt})
         if system:
             kwargs["system"] = system
         if not thinking:
@@ -130,7 +134,7 @@ async def structured(schema: type[T], messages: list[dict], *, role: Role = "def
                 async with client().messages.stream(**kwargs) as st:
                     resp = await st.get_final_message()
             else:
-                resp = await client().messages.parse(**kwargs)
+                resp = await client().messages.create(**kwargs)
         await _account(model, resp.usage, task=task)
 
         if resp.stop_reason == "max_tokens":
@@ -138,23 +142,26 @@ async def structured(schema: type[T], messages: list[dict], *, role: Role = "def
                 raise StructuredOutputError(f"{task}: max_tokens({max_tokens})에서 두 번 중단")
             retried_tokens, max_tokens = True, max_tokens * 2
             continue
-        parsed = resp.parsed_output
         problem = None
+        parsed = None
         if resp.stop_reason == "refusal":
             problem = "refusal"
-        elif parsed is None:
-            problem = "스키마 파싱 실패"
-        elif validate is not None:
-            problem = validate(parsed)
-        if problem is None:
+        else:
+            try:
+                parsed = schema.model_validate_json(text_of(resp))
+            except ValidationError as e:
+                problem = f"스키마 파싱 실패: {str(e)[:200]}"
+            if parsed is not None and validate is not None:
+                problem = validate(parsed)
+        if problem is None and parsed is not None:
             if s.llm_cache:
                 await get_cache().set("llm", cache_key, parsed.model_dump(mode="json"))
             return parsed
-        last_err = problem
+        last_err = problem or "스키마 파싱 실패"
         if retried_content:
             raise StructuredOutputError(f"{task}: {last_err}")
         retried_content = True
-        log.warning("structured %s 재시도: %s", task, problem)
+        log.warning("structured %s 재시도: %s", task, last_err)
 
 
 @traceable(run_type="llm", name="claude.cited")
