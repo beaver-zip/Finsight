@@ -83,11 +83,6 @@ def new_run_dir(config_id: str) -> Path:
     return d
 
 
-def latest_run(config_id: str) -> Path | None:
-    runs = sorted((RESULTS / config_id).glob("*/summary.json")) if (RESULTS / config_id).exists() else []
-    return runs[-1].parent if runs else None
-
-
 def write_summary(run_dir: Path, cfg: Config, split: str, metrics: dict[str, Any], extra_md: str = "",
                   meta: dict | None = None) -> None:
     summary = {"config": cfg.id, "suite": cfg.suite, "split": split, "params": cfg.params, "metrics": metrics,

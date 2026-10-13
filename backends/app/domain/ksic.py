@@ -105,26 +105,6 @@ KSIC_SUBCLASSES = {
 }
 
 
-def describe_industry(induty_code: str) -> str:
-    """업종코드를 '코드 (업종명)' 형태의 읽을 수 있는 문자열로 변환한다.
-
-    Args:
-        induty_code: DART 기업개황의 induty_code (예: "264")
-
-    Returns:
-        예: "통신 및 방송 장비 제조업 (업종코드 264)".
-        매핑에 없으면 코드만 표기한다.
-    """
-    code = (induty_code or "").strip()
-    if not code:
-        return "정보 없음"
-
-    name = KSIC_SUBCLASSES.get(code[:3]) or KSIC_DIVISIONS.get(code[:2])
-    if name:
-        return f"{name} (업종코드 {code})"
-    return f"업종코드 {code}"
-
-
 def industry_name(induty_code: str) -> str | None:
     code = (induty_code or "").strip()
     return KSIC_SUBCLASSES.get(code[:3]) or KSIC_DIVISIONS.get(code[:2])

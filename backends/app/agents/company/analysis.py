@@ -270,7 +270,7 @@ def _growth(cur: float | None, base: float | None) -> float | None:
 
 
 def _latest(c: dict) -> None:
-    F, data, rows, by_all, L, pre = c["F"], c["data"], c["rows"], c["by_all"], c["L"], c["pre"]
+    F, data, by_all, L, pre = c["F"], c["data"], c["by_all"], c["L"], c["pre"]
     if L is None:
         return
     y, q = L.year, L.q
@@ -405,7 +405,7 @@ def _op_chart(c: dict) -> None:
 
 # ---------------- 영업이익률 이력(대표 차트)
 def _opm_history(c: dict) -> None:
-    F, data, rows, L = c["F"], c["data"], c["rows"], c["L"]
+    F, data, rows = c["F"], c["data"], c["rows"]
     ser = [(r.key, f(r.operating_income) / f(r.revenue) * 100) for r in rows
            if r.revenue and r.operating_income is not None and f(r.revenue) > 0]
     if len(ser) < 8 or c["inp"].industry == "financial":
@@ -631,7 +631,6 @@ def _segments(c: dict) -> None:
     total_op = f(next(r for r in rows if r.key == last).operating_income)
     share = seg_last[main]["op"] / total_op * 100 if total_op and total_op > 0 else None
     yago = qkey(int("20" + last[2:4]) - 1, int(last[0]))
-    lk = per_label(last)
     F.add("seg1_op", last, f"{short(main)} 부문 영업이익({last})", fmt.money(seg_last[main]["op"]), seg_last[main]["op"], "KRW",
           source=inp.segment_source)
     if share is not None:
@@ -747,9 +746,9 @@ def _valuation(c: dict) -> None:
     if bmax is not cur and band.index(bmax) >= len(band) - 24:
         F.add("px_since_peak", "hist", f"PBR 최고 시점({fmt.ym(bmax['d'])}) 이후 주가 변화", fmt.move((cur["p"] / bmax["p"] - 1) * 100),
               (cur["p"] / bmax["p"] - 1) * 100, "%")
-        F.add("bps_since_peak", "hist", f"같은 기간 BPS 변화", fmt.change((cur["bps"] / bmax["bps"] - 1) * 100),
+        F.add("bps_since_peak", "hist", "같은 기간 BPS 변화", fmt.change((cur["bps"] / bmax["bps"] - 1) * 100),
               (cur["bps"] / bmax["bps"] - 1) * 100, "%")
-        F.add("pbr_since_peak", "hist", f"같은 기간 PBR 변화", fmt.move((cur["pbr"] / bmax["pbr"] - 1) * 100, 0),
+        F.add("pbr_since_peak", "hist", "같은 기간 PBR 변화", fmt.move((cur["pbr"] / bmax["pbr"] - 1) * 100, 0),
               (cur["pbr"] / bmax["pbr"] - 1) * 100, "%")
         title = f"PBR은 {bmin['pbr']:.2f}배에서 {bmax['pbr']:.2f}배까지 오른 뒤 {cur['pbr']:.2f}배" if band.index(bmin) < band.index(bmax) \
             else f"PBR {cur['pbr']:.2f}배, {first_year}년 이후 {pos_txt}"
@@ -1025,7 +1024,7 @@ def _events(c: dict) -> None:
 
 # ---------------- 1년 주가
 def _rel(c: dict) -> None:
-    inp, F, data = c["inp"], c["F"], c["data"]
+    inp, data = c["inp"], c["data"]
     px, ix = inp.px, inp.index_px
     if not px or not ix:
         return

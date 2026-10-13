@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 from app.core import llm
 from app.domain.binding import SLOT, display, missing_slots, slots_in, untraceable_numbers
-from app.domain.models import Claim, LegalFinding, Metric, NewsItem, VerificationIssue, VerificationResult
+from app.domain.models import Claim, Metric, NewsItem, VerificationIssue, VerificationResult
 
 ADVICE = re.compile(r"매수|매도|목표\s*주가|목표가|비중\s*(?:확대|축소)|투자\s*추천|사야|팔아야")
 
@@ -29,7 +29,7 @@ class Evidence:
 
     @classmethod
     def build(cls, metrics: dict[str, Metric], news: list[NewsItem], news_text: dict[str, str],
-              regulatory: list[LegalFinding], legal_texts: dict[str, str] | None = None) -> "Evidence":
+              legal_texts: dict[str, str] | None = None) -> "Evidence":
         return cls(metrics={m.slot_id: m for m in metrics.values()}, news={n.id: n for n in news},
                    news_text=news_text, legal=dict(legal_texts or {}))
 

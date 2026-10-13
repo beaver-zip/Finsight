@@ -4,7 +4,8 @@ import { useState, useEffect, useCallback } from "react";
 // API 응답으로 받을 파일의 타입 (필요에 따라 수정)
 export interface CollectionFile {
   file_name: string;
-  [key: string]: any;
+  chunk_count?: number;
+  articles?: number;
 }
 
 const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";

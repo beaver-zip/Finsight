@@ -19,7 +19,7 @@ from app.core.dart.segments import SOURCES, segment_cumulative
 from app.core.dart.shares import BuybackDecision, Dividend, Shares, buyback_decisions, dividend, share_counts
 from app.core.market import daily_close, index_ticker, splits, ticker_for
 from app.core.peers import PeerRow, peer_rows, pref_price
-from app.domain.metrics import industry_group
+from app.domain.accounts import industry_group
 from app.domain.models import CorpProfile, PeriodicFiling
 
 log = logging.getLogger(__name__)
@@ -78,9 +78,6 @@ async def collect(dart: DartClient, http: httpx.AsyncClient, corp: CorpProfile, 
     listed = bool(corp.stock_code)
     tk = ticker_for(corp.stock_code, corp.corp_cls) if listed else None
     itk, out.index_name = index_ticker(corp.corp_cls)
-
-    async def none():
-        return None
 
     async def empty():
         return []

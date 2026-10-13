@@ -48,7 +48,3 @@ def parse_published(s: str | None, *, now: datetime | None = None) -> datetime |
             return now - timedelta(**{_UNIT[unit]: n})
     return None
 
-
-def age_days(published: datetime, now: datetime | None = None) -> float:
-    now = now or datetime.now(KST)
-    return (now - published).total_seconds() / 86_400

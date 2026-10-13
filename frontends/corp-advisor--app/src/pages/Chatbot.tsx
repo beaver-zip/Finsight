@@ -25,9 +25,7 @@ function Chatbot() {
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState("");
-  const [typingTextMap, setTypingTextMap] = useState<{
-    [id: number]: { answer: string; cites?: any[] };
-  }>({});
+  const [typingTextMap, setTypingTextMap] = useState<{ [id: number]: string }>({});
   const [queryMode, setQueryMode] = useState<QueryMode>("auto");
   const [awaitingResume, setAwaitingResume] = useState(false);
   const { send, isLoading, resetThread } = useChatStream();
@@ -54,9 +52,8 @@ function Chatbot() {
     const entries = Object.entries(typingTextMap);
     if (entries.length === 0) return;
     const intervals: ReturnType<typeof setInterval>[] = [];
-    entries.forEach(([idStr, data]) => {
+    entries.forEach(([idStr, fullText]) => {
       const id = Number(idStr);
-      const fullText = data.answer ?? "";
       const step = Math.max(2, Math.ceil(fullText.length / 220));
       let charIndex = 0;
       const intervalId = setInterval(() => {
@@ -70,7 +67,7 @@ function Chatbot() {
           clearInterval(intervalId);
           setMessages((prev) =>
             prev.map((msg) =>
-              msg.id === id ? { ...msg, isStreaming: false, type: "answer", cites: data.cites } : msg,
+              msg.id === id ? { ...msg, isStreaming: false, type: "answer" } : msg,
             ),
           );
           setTypingTextMap((prev) => {
@@ -136,12 +133,9 @@ function Chatbot() {
           // 출처는 답변 마크다운 끝의 번호 목록(본문 [1]과 같은 번호)에 있으므로 따로 패널을 띄우지 않는다
           setTypingTextMap((prev) => ({
             ...prev,
-            [aid]: {
-              answer:
-                (answer?.markdown ?? "답변을 만들지 못했습니다.") +
-                (cut ? "\n\n> 요청 하나에 쓸 수 있는 토큰을 넘어 일부 단계를 건너뛰었습니다." : ""),
-              cites: [],
-            },
+            [aid]:
+              (answer?.markdown ?? "답변을 만들지 못했습니다.") +
+              (cut ? "\n\n> 요청 하나에 쓸 수 있는 토큰을 넘어 일부 단계를 건너뛰었습니다." : ""),
           }));
         },
         onError: (message, partial, code) => {
@@ -257,13 +251,7 @@ function Chatbot() {
             <div className={`${columnClass} flex flex-col gap-6`}>
               {messages.map((msg) => (
                 <div key={msg.id}>
-                  <Bubble
-                    isLoading={isLoading}
-                    onCiteClick={() => {}}
-                    isQuestion={msg.type === "question"}
-                    cites={msg.cites || []}
-                    msg={msg}
-                  />
+                  <Bubble isQuestion={msg.type === "question"} msg={msg} />
                   {msg.options && msg.options.length > 0 && (
                     <div className="ml-10 mt-2 flex flex-wrap gap-2">
                       {msg.options.map((opt) => (

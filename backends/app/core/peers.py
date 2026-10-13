@@ -17,7 +17,7 @@ from app.core.dart.client import DartClient
 from app.core.dart.history import RC, cum_value, value
 from app.core.dart.shares import share_counts
 from app.core.market import daily_close, pref_candidates, ticker_for
-from app.domain.metrics import industry_group
+from app.domain.accounts import industry_group
 from app.domain.models import CorpProfile
 from app.settings import BACKEND_DIR
 

@@ -1,6 +1,6 @@
 """참조 해석기 정확도 측정용 표본: 코퍼스 조문 본문의 참조 표현('제N조', '별표 N') 100개와 해석기 초안.
 
-사용: cd backends && PYTHONPATH=. python scripts/sample_citations.py
+사용: cd backends && PYTHONPATH=. python -m eval.build.citation_refs
 결과: eval/datasets/citation_refs.v1.csv(엑셀에서 열리게 UTF-8 BOM). 사람이 '판정'에 O/X, 틀렸으면 '정답_대상'을 채운다.
 표본은 표현이 나온 위치를 단위로 뽑아서, 해석기가 놓친 표현(재현율)과 잘못 푼 표현(정밀도)을 함께 잰다.
 """

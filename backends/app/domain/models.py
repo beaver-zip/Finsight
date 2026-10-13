@@ -208,17 +208,7 @@ class NewsItem(BaseModel):
     analysis: ArticleAnalysis | None = None
 
 
-class NewsFindings(BaseModel):
-    summary: str
-    items: list[NewsItem]
-
-
 # ---------- 법령 ----------
-class PdfLocation(BaseModel):
-    file_name: str
-    page: int
-
-
 class Paragraph(BaseModel):
     key: str                           # "전자금융거래법시행령:11-4:p4"
     no: int
@@ -238,7 +228,6 @@ class Article(BaseModel):
     paragraphs: list[Paragraph] = Field(default_factory=list)
     effective_date: date | None = None
     source: Literal["lawgo", "upload"] = "lawgo"
-    pdf: PdfLocation | None = None
 
     @property
     def display_title(self) -> str:
@@ -291,7 +280,6 @@ class Citation(BaseModel):
     id: str
     label: str
     url: str | None = None
-    pdf: PdfLocation | None = None
 
 
 class SubResult(BaseModel):

@@ -5,7 +5,8 @@ import re
 from dataclasses import dataclass
 from typing import Literal
 
-from app.domain.models import FinancialLine, FinancialSnapshot
+from app.domain.ksic import is_financial_division
+from app.domain.models import FinancialLine, FinancialSnapshot, IndustryGroup
 
 Method = Literal["id", "name"]
 
@@ -99,3 +100,10 @@ def find_line(snapshot: FinancialSnapshot, metric: str) -> Found | None:
 
 def has_current_assets(snapshot: FinancialSnapshot) -> bool:
     return any(ln.sj_div == "BS" and ln.account_id == "ifrs-full_CurrentAssets" for ln in snapshot.lines)
+
+
+def industry_group(snapshot: FinancialSnapshot, induty_code: str | None) -> IndustryGroup:
+    """금융 세트: induty_code 앞 두 자리가 64·65·66이면서 재무상태표에 유동자산 줄이 없는 회사."""
+    if is_financial_division(induty_code or "") and not has_current_assets(snapshot):
+        return "financial"
+    return "general"

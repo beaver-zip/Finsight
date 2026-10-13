@@ -108,9 +108,6 @@ class LawTools:
     def get_article(self, key: str) -> Article | Annex | None:
         return self.corpus.get(key)
 
-    def get_annex(self, key: str) -> Annex | None:
-        return self.corpus.annexes.get(key)
-
     async def expand_citations(self, query: str, keys: list[str], hops: int = 1, lam: float = 0.1,
                                limit: int = 20) -> list[ArticleHit]:
         """시드에서 참조·위임 엣지를 hops까지 따라간 후보(가까운 순 limit개)를 질문으로 리랭크하고 점수 − λ·hops로 정렬."""

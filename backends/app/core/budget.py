@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import contextvars
 from dataclasses import dataclass, field
-from decimal import Decimal
 
 from app.core.cache import get_cache
 from app.settings import get_settings
@@ -109,10 +108,6 @@ def start_request() -> RequestUsage:
     return u
 
 
-def current_request() -> RequestUsage | None:
-    return _request_usage.get()
-
-
 def add_request_usage(service: str, tokens: int, cost: float) -> None:
     u = _request_usage.get()
     if u is None:
@@ -137,6 +132,3 @@ def token_budget_event(u: RequestUsage | None) -> dict | None:
     return {"code": "TOKEN_BUDGET", "partial": True,
             "message": f"요청 하나의 Claude 토큰이 상한({get_settings().request_token_budget:,})을 넘어 이후 LLM 호출을 멈췄습니다"}
 
-
-def to_decimal(x: float) -> Decimal:
-    return Decimal(str(round(x, 6)))

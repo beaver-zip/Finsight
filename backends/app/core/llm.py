@@ -1,4 +1,4 @@
-"""생성 모델(Claude) 호출. 노드는 structured()·cited()만 쓰고, 뉴스·웹 에이전트는 agent_model()을 쓴다.
+"""생성 모델(Claude) 호출. 노드는 structured()·cited()·text()를 쓴다.
 
 - temperature·top_p·top_k는 보내지 않는다(기본값과 다르면 400).
 - 프리필을 쓰지 않는다. 메시지 목록은 항상 user 턴으로 끝난다.
@@ -217,13 +217,3 @@ async def text(messages: list[dict], *, role: Role = "default", effort: Effort =
         await get_cache().set("llm", cache_key, out)
     return out
 
-
-def agent_model(effort: Effort = "medium"):
-    """뉴스·웹 에이전트용 ChatAnthropic. temperature는 지정하지 않는다."""
-    from langchain_anthropic import ChatAnthropic
-
-    s = get_settings()
-    return ChatAnthropic(model=s.llm_model, api_key=require(s.anthropic_api_key, "ANTHROPIC_API_KEY"),
-                         base_url="https://api.anthropic.com", max_tokens=MAX_TOKENS[effort],
-                         timeout=CLAUDE_TIMEOUT_S, max_retries=2,
-                         model_kwargs={"output_config": {"effort": effort}})

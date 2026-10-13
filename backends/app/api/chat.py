@@ -25,7 +25,6 @@ router = APIRouter()
 
 class ChatRequest(BaseModel):
     thread_id: str
-    user_id: str | None = None
     message: str | None = None
     mode: Literal["auto", "legal", "company", "news"] = "auto"
     resume: str | None = None              # 되묻기에 대한 답(선택지 문자열 또는 자유 입력)

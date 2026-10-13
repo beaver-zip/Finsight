@@ -121,10 +121,6 @@ class LawVectors:
         await col.data.delete_many(where=Filter.by_property("source").equal(source)
                                    & Filter.by_property("law_name").equal(law_name))
 
-    async def delete_source(self, source: str) -> None:
-        col = self.client.collections.get(COLLECTION)
-        await col.data.delete_many(where=Filter.by_property("source").equal(source))
-
     async def hybrid(self, query: str, *, alpha: float = 0.5, limit: int = 40,
                      levels: list[str] | None = None) -> list[ChunkHit]:
         col = self.client.collections.get(COLLECTION)
