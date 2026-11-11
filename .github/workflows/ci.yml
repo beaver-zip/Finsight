@@ -38,6 +38,8 @@ jobs:
           cache: npm
           cache-dependency-path: frontends/corp-advisor--app/package-lock.json
       - run: npm ci
+      - name: 프론트 회귀 검사
+        run: npm test
       - name: 타입 검사와 빌드
         run: npm run build
 

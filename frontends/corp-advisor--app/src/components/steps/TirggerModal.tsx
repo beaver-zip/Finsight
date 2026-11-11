@@ -4,7 +4,7 @@ import { Button } from "../Button";
 const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 type Props = {
-  files: File[]; // 표시할 파일 이름
+  files: string[]; // 표시할 파일 이름
   onTriggerSuccess: () => void; // 트리거 성공 시 호출될 함수
 };
 
@@ -15,13 +15,13 @@ export function TriggerModal({ files, onTriggerSuccess }: Props) {
   const handleTrigger = async () => {
     setIsProcessing(true);
 
-    const fileNames = files.map((file) => file.name).join(", ");
+    const fileNames = files.join(", ");
     console.log("업로드할 파일들:", fileNames);
     try {
       const response = await fetch(`${BASE_URL}/rag/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ file_name: files.map((f) => f.name) }),
+        body: JSON.stringify({ file_name: files }),
       });
       const data = await response.json();
       if (!response.ok) {

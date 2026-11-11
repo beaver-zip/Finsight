@@ -6,9 +6,9 @@ import { StepIndicator } from "./StepIndicator";
 // Modal 컴포넌트가 받을 props 타입 정의
 type ModalProps = {
   currentStep: number;
-  uploadedFiles: File[];
+  uploadedFiles: string[];
   onClose: () => void;
-  onUploadSuccess: (files: File[]) => void;
+  onUploadSuccess: (files: string[]) => void;
   onTriggerSuccess: () => void;
 };
 

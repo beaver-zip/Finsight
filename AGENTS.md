@@ -21,6 +21,7 @@ These guidelines apply to `beaver-zip/Finsight`. Run commands from its checkout,
 - `uvicorn app.main:app --port 8000`: start the backend from `backends/`.
 - From `frontends/corp-advisor--app/`, run `npm ci`, then `npm run dev`.
 - `npm run build`: run TypeScript checks and create the frontend build.
+- `npm test`: run frontend API/stream regression tests with Node's built-in test runner.
 - `npm run lint`: run ESLint; follow existing configuration.
 
 ## Coding Style & Naming Conventions
@@ -29,7 +30,7 @@ Use four-space Python indentation, type annotations, and `snake_case` functions.
 
 ## Testing Guidelines
 
-Use pytest and pytest-asyncio; name files `test_*.py` and tests `test_<behavior>`. Reproduce bugs before fixing them, then retain those tests. Test normal behavior alongside failures, especially financial values, citations, document replacement, and nested cost accounting. Use fixed fixtures and isolated storage; keep paid API evaluations separate. No numeric coverage threshold is configured. CI runs backend tests, frontend builds, and secret scanning; frontend behavioral tests need separate tooling.
+Use pytest and pytest-asyncio; name files `test_*.py` and tests `test_<behavior>`. Reproduce bugs before fixing them, then retain those tests. Test normal behavior alongside failures, especially financial values, citations, document replacement, and nested cost accounting. Use fixed fixtures and isolated storage; keep paid API evaluations separate. No numeric coverage threshold is configured. CI runs backend tests, frontend regression tests and builds, and secret scanning.
 
 ## Commit & Pull Request Guidelines
 

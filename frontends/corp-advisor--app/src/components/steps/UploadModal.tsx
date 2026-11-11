@@ -1,11 +1,12 @@
 import { useState } from "react";
+import { uploadPdfs } from "../../api/documents";
 import { FileUploader } from "../FileUploader";
 import { Button } from "../Button";
 const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 // UploadModal 컴포넌트가 받을 props 타입 정의
 type UploadModalProps = {
-  onUploadSuccess: (files: File[]) => void;
+  onUploadSuccess: (files: string[]) => void;
 };
 
 export function UploadModal({ onUploadSuccess }: UploadModalProps) {
@@ -22,25 +23,12 @@ export function UploadModal({ onUploadSuccess }: UploadModalProps) {
 
     setIsUploading(true);
 
-    const formData = new FormData();
-    uploadedFiles.forEach((file) => {
-      formData.append("files", file); // 'files'는 백엔드와 약속된 key
-    });
-    const fileNames = uploadedFiles.map((file) => file.name).join(", ");
-    console.log("업로드할 파일들:", fileNames);
-        try {
-      const response = await fetch(`${BASE_URL}/files/upload-pdf`, {
-        method: "POST",
-        body: formData,
-      });
-      const data = await response.json();
-      const body = response.ok ? data : data.detail ?? {};
-      const accepted: string[] = body.uploaded ?? [];
-      const rejected: { file: string; reason: string }[] = body.rejected ?? [];
+    try {
+      const { uploaded: accepted, rejected } = await uploadPdfs(BASE_URL, uploadedFiles);
       setUploadError(rejected.map((r) => r.reason).join("\n") || null);
       if (accepted.length > 0) {
         // 서버가 받아 준 파일만 다음 단계(벡터 적재)로 넘긴다
-        onUploadSuccess(uploadedFiles.filter((f) => accepted.includes(f.name)));
+        onUploadSuccess(accepted);
       }
     } catch (err) {
       console.error("파일 업로드에 실패했습니다:", err);

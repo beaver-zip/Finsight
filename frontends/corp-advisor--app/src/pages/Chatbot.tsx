@@ -34,7 +34,7 @@ function Chatbot() {
   const { files: collectionFiles, refetch: refetchCollectionFiles } = useCollectionFiles();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
-  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const [uploadedFiles, setUploadedFiles] = useState<string[]>([]);
   const openModal = () => {
     setCurrentStep(1);
     setIsModalOpen(true);
