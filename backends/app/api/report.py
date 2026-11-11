@@ -25,7 +25,7 @@ from app.domain.models import Citation, CompanyReport
 log = logging.getLogger(__name__)
 router = APIRouter()
 WEEK = 7 * 86_400
-VERSION = "v2.3"            # 사실표가 바뀌면 올린다(v2.3: 연간 영업이익·순이익은 사업보고서 값)
+VERSION = "v2.4"            # v2.4: 검증을 통과한 완성본만 캐시
 
 
 def _to_report(out: dict, cost: float | None) -> CompanyReport:
@@ -64,6 +64,11 @@ def _config(st: AppState) -> dict:
             "recursion_limit": 30, "metadata": {}}
 
 
+def _cacheable(out: dict, usage: budget.RequestUsage) -> bool:
+    ver = out.get("verification")
+    return out.get("draft") is not None and ver is not None and ver.passed and not usage.exceeded
+
+
 async def build_report(st: AppState, corp_code: str) -> dict:
     cache = get_cache()
     profile, key = await _cache_key(st, corp_code)
@@ -76,7 +81,7 @@ async def build_report(st: AppState, corp_code: str) -> dict:
     out = await st.company_graph.ainvoke({"corp": profile, "errors": []}, config=cfg)
     rep = _to_report(out, round(usage.cost_usd, 5))
     value = {"html": out.get("html", ""), "json": rep.model_dump(mode="json")}
-    if out.get("draft") is not None and not usage.exceeded:   # 본문까지 만든 리포트만 캐시한다
+    if _cacheable(out, usage):
         await cache.set("report", key, value, ttl_s=WEEK)
     return value
 
@@ -149,7 +154,7 @@ async def report_stream(corp_code: str, st: AppState = Depends(get_state)):
                             final.setdefault("errors", []).extend(upd.get("errors", []) or [])
             final["corp"] = profile
             rep = _to_report(final, round(usage.cost_usd, 5))
-            if final.get("draft") is not None and not usage.exceeded:
+            if _cacheable(final, usage):
                 await get_cache().set("report", key, {"html": final.get("html", ""),
                                                       "json": rep.model_dump(mode="json")}, ttl_s=WEEK)
             for e in final.get("errors", []):

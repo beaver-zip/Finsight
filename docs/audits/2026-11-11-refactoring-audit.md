@@ -4,7 +4,7 @@
 - 대상: `beaver-zip/Finsight`, `main`, `ca0ecdc1fe2f3707b80007e2cd687a00af01b438`
 - 방법: `ponytail-audit`에 따른 코드 검토 및 일부 함수의 격리 재현 검사
 - 가정: 개인 사용자가 로컬 서버 한 개를 실행하고 내부 작업은 병렬 처리
-- 상태: 3번은 **수정 완료 (`20559f7`), 로컬·실제 Weaviate 회귀 검증 통과**. 1번도 수정·로컬 회귀 검증 완료([기록](../testing/2026-11-11-financial-cache.md)). 나머지 9개 항목은 미수정. [3번 검증 기록](../testing/2026-11-11-document-replacement.md)을 참고한다.
+- 상태: 3번은 **수정 완료 (`20559f7`), 로컬·실제 Weaviate 회귀 검증 통과**. 1번도 수정·로컬 회귀 검증 완료([기록](../testing/2026-11-11-financial-cache.md)). 2번도 수정·회귀 검증 완료([기록](../testing/2026-11-11-report-verification.md)). 나머지 8개 항목은 미수정. [3번 검증 기록](../testing/2026-11-11-document-replacement.md)을 참고한다.
 - 후속 문서: [테스트·실행 계획](../plans/2026-11-11-refactoring-test-plan.md), [기준선 검사 결과](../testing/2026-11-11-baseline.md), [인수인계](../plans/2026-11-11-handoff.md)
 
 ## 서비스와 감사 범위
@@ -29,7 +29,7 @@ README, 의존성·Docker·CI 설정, API 진입점, 문서 저장·검색, 채�
 
 ### 2. 검증 장애를 정상 완료처럼 처리하고 보고서를 캐시함
 
-- **상태/근거 수준:** 미수정. `finalize(draft, None, ...)`의 초안 유지 동작을 격리 재현. 전체 API·캐시 경로는 코드 추적.
+- **상태/근거 수준:** 수정·회귀 검증 완료. 실제 기업 그래프와 HTML/JSON/SSE 경로를 검사했다. 검증 장애 시 생성 초안을 숨기고 경고와 계산 자료를 제공하며, 검증 통과 보고서만 캐시한다. 캐시 버전 v2.4로 이전 결과를 재사용하지 않는다. [검증 기록](../testing/2026-11-11-report-verification.md).
 - **위치:** `backends/app/agents/company/nodes.py:204–255`, `writer.py:284–295`, `backends/app/api/report.py:67–80, 128–159`.
 - **역할:** 생성 문장을 검증하고 실패한 블록을 제거한 후 보고서를 제공한다.
 - **문제:** 검증 예외는 `verification=None`이 되고, finalize는 이를 통과와 같이 취급한다. 캐시는 초안 존재와 토큰 초과 여부만 확인한다.

@@ -241,15 +241,22 @@ async def assemble(state: CompanyState, config: RunnableConfig) -> dict:
         return {"html": "", "errors": ["assemble: 분석 자료가 없어 리포트를 만들지 못했다"]}
     draft, ver = state.get("draft"), state.get("verification")
     errs = []
+    warning = None
     if draft is not None:
+        if ver is None:
+            warning = "본문 검증을 완료하지 못해 생성 문장을 표시하지 않습니다. 계산된 표·차트만 제공합니다."
+        elif not ver.passed:
+            warning = "본문이 검증을 통과하지 못한 부분이 있습니다. 근거 문제가 남은 문장은 제외했습니다."
+        if warning:
+            errs.append(f"verify: {warning}")
         hero = data.charts.get("hero", {})
         draft, dropped = writer.finalize(draft, ver, hero.get("title") or data.corp["name"])
-        if dropped:
+        if dropped and ver is not None:
             errs.append(f"verify: 재작성 뒤에도 검증을 통과하지 못해 뺀 블록·제목 {', '.join(dropped)}")
     _progress("company.assemble", "리포트 조립")
     col = state.get("collected")
     fs = None
     if col is not None and col.quarters:
         fs = col.quarters[-1].fs_div
-    html = render_report(data, draft, fs_div=fs)
+    html = render_report(data, draft, fs_div=fs, warning=warning)
     return {"draft": draft, "html": html, "errors": errs}

@@ -686,7 +686,7 @@ CHARTS = {"op": ch_bars, "segments": ch_seg, "band": ch_band, "peers": ch_peers,
           "events": ch_events, "rel": ch_rel}
 
 
-def render_report(data, draft: ReportDraft | None, *, fs_div: str | None = "CFS") -> str:
+def render_report(data, draft: ReportDraft | None, *, fs_div: str | None = "CFS", warning: str | None = None) -> str:
     """data: analysis.ReportData. draft가 없으면(문장 생성 실패) 차트·표만 그린다."""
     u = Units(data.table_div == 1e9)
     tx = Text(data.facts, data.news)
@@ -737,6 +737,8 @@ def render_report(data, draft: ReportDraft | None, *, fs_div: str | None = "CFS"
     body = (
         f'<main class="doc"><header class="mast"><span class="brand">Finsight</span>'
         f'<span class="date">{made.year}년 {made.month}월 {made.day}일</span></header>'
+        + (f'<p class="notice" role="status">{esc(warning)}</p>' if warning else "")
+        +
         f'<section class="hero"><p class="co">{esc(corp["name"])}<span>{esc(corp.get("stock_code") or "")}</span></p>'
         f'<h1>{title}</h1><dl class="kd">{key_data_html(data.key_data)}</dl></section>'
         f'{lead}' + (f'<section class="points">{points}</section>' if points else "")
@@ -793,6 +795,7 @@ CSS = f"""
 {R} .mast{{display:flex;justify-content:space-between;align-items:baseline;padding-bottom:14px;border-bottom:1px solid {GRID};margin-bottom:56px}}
 {R} .brand{{font-size:17px;font-weight:700;color:{ACC};letter-spacing:-0.02em}}
 {R} .date{{font-size:13px;color:{MUTED}}}
+{R} .notice{{margin-bottom:28px;padding:16px;background:{WASH};color:{TXT};border-left:3px solid {ACC}}}
 {R} .co{{margin:0 0 12px;font-size:16px;font-weight:600;color:{INK}}}
 {R} .co span{{margin-left:8px;font-weight:500;color:{AXIS}}}
 {R} h1{{margin:0 0 40px;font-size:38px;line-height:1.28;font-weight:700;letter-spacing:-0.035em;color:{INK};border:0;padding:0}}

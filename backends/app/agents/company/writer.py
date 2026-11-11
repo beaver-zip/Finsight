@@ -281,9 +281,11 @@ async def revise(draft: ReportDraft, ver: VerificationResult, data: ReportData, 
     return draft.model_copy(update=upd)
 
 
-def finalize(draft: ReportDraft, ver: VerificationResult | None, fallback_title: str) -> tuple[ReportDraft, list[str]]:
-    """재작성 뒤에도 실패한 블록은 지우고, 실패한 제목은 대체한다(리포트 제목 → 대표 차트 제목, 절 제목 → 비움)."""
-    if ver is None or ver.passed:
+def finalize(draft: ReportDraft, ver: VerificationResult | None, fallback_title: str) -> tuple[ReportDraft | None, list[str]]:
+    """미검증 초안은 숨긴다. 검증한 초안은 실패 블록을 지우고 실패 제목을 대체한다."""
+    if ver is None:
+        return None, [c.id for c in draft.claims()]
+    if ver.passed:
         return draft, []
     # 문체 지적만 남은 블록은 내용이 맞으므로 남긴다
     failed = {i.claim_id for i in ver.issues if i.type != "style"}
