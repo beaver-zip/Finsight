@@ -18,7 +18,7 @@ from app.settings import get_settings, require
 log = logging.getLogger(__name__)
 BASE = "https://api.tavily.com"
 WEEK = 7 * 86_400
-_sem = asyncio.Semaphore(4)
+_sem = asyncio.Semaphore(1)  # 단일 프로세스에서 잔량 확인부터 장부 기록까지 직렬화한다
 
 Topic = Literal["news", "general"]
 TimeRange = Literal["day", "week", "month", "year"]
@@ -72,21 +72,24 @@ async def search(query: str, *, topic: Topic = "news", time_range: TimeRange | N
     if hit is not None:
         return hit
 
-    await budget.check_budget()
-    await budget.check_search_credits(1)
-    own = http is None
-    http = http or httpx.AsyncClient(timeout=20)
-    try:
-        async with _sem:
+    async with _sem:
+        hit = await cache.get("tavily", key)
+        if hit is not None:
+            return hit
+        await budget.check_budget()
+        await budget.check_search_credits(1)
+        own = http is None
+        http = http or httpx.AsyncClient(timeout=20)
+        try:
             r = await http.post(f"{BASE}/search", headers=_auth(), json=body, timeout=20)
-        r.raise_for_status()
-        data = r.json()
-    finally:
-        if own:
-            await http.aclose()
-    credits = int((data.get("usage") or {}).get("credits") or 1)
-    cost = budget.tavily_cost_for(credits)
-    await budget.record("tavily", cost, credits=credits, meta={"query": query, "topic": topic})
-    budget.add_request_usage("tavily", 0, cost)
-    await cache.set("tavily", key, data, ttl_s=WEEK)
-    return data
+            r.raise_for_status()
+            data = r.json()
+        finally:
+            if own:
+                await http.aclose()
+        credits = int((data.get("usage") or {}).get("credits") or 1)
+        cost = budget.tavily_cost_for(credits)
+        await budget.record("tavily", cost, credits=credits, meta={"query": query, "topic": topic})
+        budget.add_request_usage("tavily", 0, cost)
+        await cache.set("tavily", key, data, ttl_s=WEEK)
+        return data
