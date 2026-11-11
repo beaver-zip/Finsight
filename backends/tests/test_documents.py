@@ -301,8 +301,50 @@ async def test_replacement_with_isolated_weaviate(store, monkeypatch):
             hits = await vec.hybrid("policy", alpha=1)
             assert sorted(h.chunk.text for h in hits) == ["Another new page.", "New policy.", "Other policy."]
             assert {h.chunk.law_name for h in hits} == {"내규", "다른"}
+            from contextlib import asynccontextmanager
+            from app.core.law import ingest
+
+            @asynccontextmanager
+            async def borrowed_vectors():
+                yield vec
+
+            law = uploads.split_articles("테스트법", ["Law text."])[0].model_copy(update={"source": "lawgo", "level": "법률"})
+            with monkeypatch.context() as patch:
+                patch.setattr(ingest, "LawVectors", borrowed_vectors)
+                patch.setattr(ingest, "load_corpus", lambda: NS(articles={law.key: law}, annexes={}))
+                await ingest.ingest(fetch=False, graph=False)
+            hits = await vec.hybrid("policy", alpha=1, levels=["내규"])
+            assert sorted(h.chunk.text for h in hits) == ["Another new page.", "New policy.", "Other policy."]
             await documents.delete_file(documents.FileName(file_name="내규.pdf"), st)
-            assert [h.chunk.text for h in await vec.hybrid("policy", alpha=1)] == ["Other policy."]
+            assert [h.chunk.text for h in await vec.hybrid("policy", alpha=1, levels=["내규"])] == ["Other policy."]
         finally:
             if await client.collections.exists(collection):
                 await client.collections.delete(collection)
+
+
+@pytest.mark.parametrize("vector_name", [None, "upload:active-generation"])
+@pytest.mark.asyncio
+async def test_reingest_preserves_uploaded_vector_identity(store, monkeypatch, vector_name):
+    from app.core.law import ingest
+
+    arts = uploads.split_articles("내규", ["Policy text."])
+    uploads.put("내규.pdf", "내규", arts, 1, vector_name=vector_name)
+    vec = FakeVectors()
+
+    class RebuildVectors:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *args):
+            pass
+        async def reset(self):
+            vec.chunks.clear()
+        async def add(self, chunks):
+            return await vec.add(chunks)
+
+    monkeypatch.setattr(ingest, "LawVectors", RebuildVectors)
+    monkeypatch.setattr(ingest, "load_corpus", lambda: NS(articles={}, annexes={}))
+    result = await ingest.ingest(fetch=False, graph=False)
+    assert result["vectors"]["upload_chunks"] == 1
+    assert vec.chunks[0].law_name == (vector_name or "내규")
+    assert vec.chunks[0].article_key == arts[0].key
+    assert vec.chunks[0].text == "Policy text."

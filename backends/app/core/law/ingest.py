@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import collections
 import logging
+from dataclasses import replace
 
 import httpx
 
@@ -45,7 +46,8 @@ async def ingest(*, fetch: bool = True, graph: bool = True, vectors: bool = True
         chunks = [c for a in corpus.articles.values() for c in article_chunks(a)]
         for x in corpus.annexes.values():
             chunks += annex_chunks(x, corpus.level_of(x.key.split(":")[0]) or "")
-        up = [c for d in uploads.all_docs().values() for a in d["articles"]
+        up = [replace(c, law_name=d.get("vector_name", d["doc_name"]))
+              for d in uploads.all_docs().values() for a in d["articles"]
               for c in article_chunks(Article.model_validate(a))]
         async with LawVectors() as v:
             await v.reset()

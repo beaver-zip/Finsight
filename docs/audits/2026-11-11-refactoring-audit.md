@@ -4,7 +4,7 @@
 - 대상: `beaver-zip/Finsight`, `main`, `ca0ecdc1fe2f3707b80007e2cd687a00af01b438`
 - 방법: `ponytail-audit`에 따른 코드 검토 및 일부 함수의 격리 재현 검사
 - 가정: 개인 사용자가 로컬 서버 한 개를 실행하고 내부 작업은 병렬 처리
-- 상태: 3번은 **수정 완료 (`20559f7`), 로컬·실제 Weaviate 회귀 검증 통과**. 1번도 수정·로컬 회귀 검증 완료([기록](../testing/2026-11-11-financial-cache.md)). 2번도 수정·회귀 검증 완료([기록](../testing/2026-11-11-report-verification.md)). 5번은 수정·회귀 검증 완료([기록](../testing/2026-11-11-request-usage.md)). 3번은 재적재 연결 결함이 새로 확인되어 후속 수정이 필요하다. 나머지 7개 항목은 미수정. [3번 검증 기록](../testing/2026-11-11-document-replacement.md)을 참고한다.
+- 상태: 3번은 **수정 완료 (`20559f7`), 로컬·실제 Weaviate 회귀 검증 통과**. 1번도 수정·로컬 회귀 검증 완료([기록](../testing/2026-11-11-financial-cache.md)). 2번도 수정·회귀 검증 완료([기록](../testing/2026-11-11-report-verification.md)). 5번은 수정·회귀 검증 완료([기록](../testing/2026-11-11-request-usage.md)). 3번의 재적재 연결 결함도 후속 수정·실제 DB 회귀 검사로 해결했다([기록](../testing/2026-11-11-remaining-fixes.md)). 나머지 7개 항목은 미수정. [3번 검증 기록](../testing/2026-11-11-document-replacement.md)을 참고한다.
 - 후속 문서: [테스트·실행 계획](../plans/2026-11-11-refactoring-test-plan.md), [기준선 검사 결과](../testing/2026-11-11-baseline.md), [인수인계](../plans/2026-11-11-handoff.md)
 
 ## 서비스와 감사 범위
@@ -39,7 +39,7 @@ README, 의존성·Docker·CI 설정, API 진입점, 문서 저장·검색, 채�
 
 ### 3. 문서 교체 실패 전에 기존 검색 데이터를 삭제함
 
-- **상태/근거 수준:** 교체 경로 수정 (`20559f7`)과 로컬·실제 Weaviate 회귀 검증은 통과했으나 **전체 재적재 경로에 후속 결함 발견·미수정**. `ingest.py`가 새 `vector_name`을 복원하지 않아 재적재 후 검색에서 제외된다([재현 기록](../testing/2026-11-11-request-usage.md)). 현재 모듈을 호출하는 회귀 테스트 3개가 수정 전 실패하고 수정 후 통과했다. 새 세대 적재 → 메타데이터 원자적 전환 → 구세대 정리로 변경했으며 검색은 활성 세대만 조회한다. 상세 결과와 한계는 [검증 기록](../testing/2026-11-11-document-replacement.md)을 참고한다.
+- **상태/근거 수준:** 교체 경로 수정 (`20559f7`)과 로컬·실제 Weaviate 회귀 검증은 통과했으나 **발견한 재적재 연결 결함도 후속 수정 완료**. `ingest.py`가 새 `vector_name`을 복원하지 않던 문제를 고치고 재적재 후 검색을 실제 DB에서 확인했다([재현 기록](../testing/2026-11-11-request-usage.md)). 현재 모듈을 호출하는 회귀 테스트 3개가 수정 전 실패하고 수정 후 통과했다. 새 세대 적재 → 메타데이터 원자적 전환 → 구세대 정리로 변경했으며 검색은 활성 세대만 조회한다. 상세 결과와 한계는 [검증 기록](../testing/2026-11-11-document-replacement.md)을 참고한다.
 - **위치:** `backends/app/api/documents.py:69–91`, `backends/app/core/law/vector_store.py:101–117`.
 - **역할:** 같은 문서의 검색용 청크를 교체한다.
 - **문제:** 기존 청크 삭제 이후 임베딩·삽입을 실행한다. 삽입 실패 시 목록과 검색 내용이 어긋난다.
