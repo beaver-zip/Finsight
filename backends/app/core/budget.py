@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import contextvars
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 
 from app.core.cache import get_cache
@@ -96,6 +97,7 @@ class RequestUsage:
     calls: int = 0
     by_service: dict[str, float] = field(default_factory=dict)
     exceeded: bool = False          # 토큰 상한에 걸려 LLM 호출을 멈춘 적이 있다(노드가 예외를 삼켜도 남는다)
+    parent: RequestUsage | None = field(default=None, repr=False)
 
 
 _request_usage: contextvars.ContextVar[RequestUsage | None] = contextvars.ContextVar(
@@ -108,21 +110,37 @@ def start_request() -> RequestUsage:
     return u
 
 
+@contextmanager
+def request_scope():
+    """하위 작업의 비용을 따로 측정하면서 상위 요청에도 포함한다."""
+    usage = RequestUsage(parent=_request_usage.get())
+    token = _request_usage.set(usage)
+    try:
+        yield usage
+    finally:
+        _request_usage.reset(token)
+
+
 def add_request_usage(service: str, tokens: int, cost: float) -> None:
     u = _request_usage.get()
-    if u is None:
-        return
-    u.tokens += tokens
-    u.cost_usd += cost
-    u.calls += 1
-    u.by_service[service] = u.by_service.get(service, 0.0) + cost
+    while u is not None:
+        u.tokens += tokens
+        u.cost_usd += cost
+        u.calls += 1
+        u.by_service[service] = u.by_service.get(service, 0.0) + cost
+        u = u.parent
 
 
 def check_request_tokens() -> None:
     u = _request_usage.get()
-    if u is not None and u.tokens >= get_settings().request_token_budget:
-        u.exceeded = True
-        raise TokenBudgetExceeded(f"요청 토큰 {u.tokens} ≥ {get_settings().request_token_budget}")
+    scopes = []
+    while u is not None:
+        scopes.append(u)
+        u = u.parent
+    if scopes and scopes[-1].tokens >= get_settings().request_token_budget:
+        for scope in scopes:
+            scope.exceeded = True
+        raise TokenBudgetExceeded(f"요청 토큰 {scopes[-1].tokens} ≥ {get_settings().request_token_budget}")
 
 
 def token_budget_event(u: RequestUsage | None) -> dict | None:

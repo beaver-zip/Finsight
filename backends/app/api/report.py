@@ -75,15 +75,15 @@ async def build_report(st: AppState, corp_code: str) -> dict:
     hit = await cache.get("report", key)
     if hit is not None:
         return hit
-    usage = budget.start_request()
-    cfg = _config(st)
-    cfg["metadata"] = {"corp_code": corp_code}
-    out = await st.company_graph.ainvoke({"corp": profile, "errors": []}, config=cfg)
-    rep = _to_report(out, round(usage.cost_usd, 5))
-    value = {"html": out.get("html", ""), "json": rep.model_dump(mode="json")}
-    if _cacheable(out, usage):
-        await cache.set("report", key, value, ttl_s=WEEK)
-    return value
+    with budget.request_scope() as usage:
+        cfg = _config(st)
+        cfg["metadata"] = {"corp_code": corp_code}
+        out = await st.company_graph.ainvoke({"corp": profile, "errors": []}, config=cfg)
+        rep = _to_report(out, round(usage.cost_usd, 5))
+        value = {"html": out.get("html", ""), "json": rep.model_dump(mode="json")}
+        if _cacheable(out, usage):
+            await cache.set("report", key, value, ttl_s=WEEK)
+        return value
 
 
 def _http_error(e: Exception) -> HTTPException:

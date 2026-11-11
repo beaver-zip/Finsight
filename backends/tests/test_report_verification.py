@@ -144,3 +144,31 @@ def test_html_json_stream_share_verified_cache(scenario):
         stream = client.get("/report/test/stream").text
         assert '"cached": true' in stream and "남길 문장" in stream
     assert scenario.verify.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_nested_report_usage_is_included_in_parent_and_cached_cost_stays_local(scenario, monkeypatch):
+    import asyncio
+
+    parent = budget.start_request()
+    budget.add_request_usage("anthropic", 10, 0.1)
+    invoke = scenario.st.company_graph.ainvoke
+
+    async def accounted(*args, **kwargs):
+        await asyncio.sleep(0)
+        budget.add_request_usage("anthropic", 20, 0.2)
+        return await invoke(*args, **kwargs)
+
+    monkeypatch.setattr(scenario.st.company_graph, "ainvoke", accounted)
+
+    async def sibling():
+        budget.add_request_usage("tavily", 0, 0.3)
+
+    result, _ = await asyncio.gather(report.build_report(scenario.st, "test"), sibling())
+    assert parent.tokens == 30 and parent.cost_usd == pytest.approx(0.6)
+    assert parent.calls == 3 and parent.by_service == pytest.approx({"anthropic": 0.3, "tavily": 0.3})
+    assert result["json"]["cost_usd"] == pytest.approx(0.2)
+    await report.build_report(scenario.st, "test")
+    assert parent.cost_usd == pytest.approx(0.6)
+    budget.add_request_usage("anthropic", 5, 0.1)
+    assert parent.tokens == 35

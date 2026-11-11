@@ -54,3 +54,16 @@ def test_request_token_cap(monkeypatch):
     ev = budget.token_budget_event(u)
     assert u.exceeded and ev["code"] == "TOKEN_BUDGET" and ev["partial"] and "1,000" in ev["message"]
     assert error_code(e.value) == "TOKEN_BUDGET"
+
+
+def test_nested_request_scope_limits_parent_and_restores_after_error(monkeypatch):
+    monkeypatch.setattr(get_settings(), "request_token_budget", 100)
+    parent = budget.start_request()
+    budget.add_request_usage("anthropic", 90, 0.1)
+    with pytest.raises(budget.TokenBudgetExceeded):
+        with budget.request_scope() as child:
+            budget.add_request_usage("anthropic", 15, 0.2)
+            budget.check_request_tokens()
+    assert parent.exceeded and child.exceeded and parent.tokens == 105 and child.tokens == 15
+    budget.add_request_usage("anthropic", 1, 0)
+    assert parent.tokens == 106 and child.tokens == 15
