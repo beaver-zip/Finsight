@@ -1,4 +1,4 @@
-"""CacheBackend: 응답 캐시와 비용 장부를 한 SQLite 파일에 둔다."""
+"""응답 캐시와 비용 장부를 한 SQLite 파일에 둔다."""
 from __future__ import annotations
 
 import asyncio
@@ -7,7 +7,6 @@ import json
 import sqlite3
 import threading
 import time
-from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
 
@@ -18,31 +17,7 @@ def make_key(*parts: Any) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
-class CacheBackend(ABC):
-    @abstractmethod
-    async def get(self, namespace: str, key: str) -> Any | None: ...
-
-    @abstractmethod
-    async def set(self, namespace: str, key: str, value: Any, ttl_s: float | None = None) -> None: ...
-
-    @abstractmethod
-    async def delete(self, namespace: str, key: str) -> None: ...
-
-    @abstractmethod
-    async def purge_expired(self) -> int: ...
-
-    # 비용 장부
-    @abstractmethod
-    async def record_cost(self, entry: dict) -> None: ...
-
-    @abstractmethod
-    async def total_cost(self) -> float: ...
-
-    @abstractmethod
-    async def total_credits(self, service: str) -> int: ...
-
-
-class SQLiteCache(CacheBackend):
+class SQLiteCache:
     def __init__(self, path: Path):
         path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(path, check_same_thread=False, isolation_level=None)

@@ -42,3 +42,9 @@
 - Weaviate HTTP/gRPC와 Neo4j HTTP/Bolt 공개 포트 4개를 `127.0.0.1`에 바인딩한다. 컨테이너 내부 포트 및 backend의 서비스명 기반 주소는 유지한다.
 - `docker compose config --no-env-resolution --format json`을 파싱해 네 포트의 `host_ip`, 외부·내부 포트와 backend 연결 주소를 검증했다. `.env`의 비밀값을 해석하거나 출력하지 않았다.
 - 실제 사용자 컨테이너를 재생성하거나 볼륨을 수정하지 않았다. 실행 중인 기존 컨테이너에는 다음 재생성 때 반영된다. Neo4j 실접속·다른 기기의 접근 차단은 실행하지 않았다.
+
+## 감사 11 — 단일 구현 캐시 추상 클래스 제거 완료
+
+- 전체 Python 호출부를 검색해 SQLiteCache만 사용함을 확인하고 `CacheBackend`, ABC 관련 import·상속만 제거했다. SQLite 동작과 인터페이스·비용 장부는 유지한다. 소스 25줄 순감소.
+- 전체 백엔드 **174 passed, 1 deselected**, 17.35초. 최초 저장소 루트에서 경로 없이 실행한 검사는 앱 import 경로가 없어 수집 오류가 났고, 지침대로 `backends/`에서 재실행해 통과했다.
+- 새 테스트는 추가하지 않았다. 기존 실제 SQLite 캐시·만료·장부 및 서비스 경로 검사를 사용했다.
