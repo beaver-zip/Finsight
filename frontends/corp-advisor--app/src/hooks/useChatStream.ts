@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from "react";
+import { readChatStream } from "../api/chatStream";
 
 const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
@@ -19,7 +20,7 @@ export type FinalAnswer = {
 
 export type Interrupt = { question: string; options: string[] };
 
-type Handlers = {
+export type Handlers = {
   onProgress?: (detail: string) => void;
   onInterrupt?: (it: Interrupt) => void;
   onFinal?: (answer: FinalAnswer | null) => void;
@@ -57,35 +58,7 @@ export function useChatStream() {
           signal: ctrl.signal,
         });
         if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buf = "";
-        let finished = false;
-        while (!finished) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buf += decoder.decode(value, { stream: true });
-          let idx: number;
-          while ((idx = buf.indexOf("\n\n")) >= 0) {
-            const raw = buf.slice(0, idx);
-            buf = buf.slice(idx + 2);
-            const ev = /^event: (.*)$/m.exec(raw)?.[1];
-            const dataLine = /^data: (.*)$/m.exec(raw)?.[1];
-            if (!ev || !dataLine) continue;
-            const data = JSON.parse(dataLine);
-            if (ev === "progress") h.onProgress?.(data.detail);
-            else if (ev === "interrupt") {
-              h.onInterrupt?.({ question: data.question, options: data.options || [] });
-              finished = true;
-            } else if (ev === "final") {
-              h.onFinal?.(data.answer);
-              finished = true;
-            } else if (ev === "error") {
-              h.onError?.(data.message, Boolean(data.partial), data.code);
-              if (!data.partial) finished = true;
-            }
-          }
-        }
+        await readChatStream(res.body, h, ctrl.signal);
       } catch (e) {
         if ((e as Error).name !== "AbortError") {
           h.onError?.(e instanceof Error ? e.message : String(e), false);

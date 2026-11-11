@@ -48,3 +48,12 @@
 - 전체 Python 호출부를 검색해 SQLiteCache만 사용함을 확인하고 `CacheBackend`, ABC 관련 import·상속만 제거했다. SQLite 동작과 인터페이스·비용 장부는 유지한다. 소스 25줄 순감소.
 - 전체 백엔드 **174 passed, 1 deselected**, 17.35초. 최초 저장소 루트에서 경로 없이 실행한 검사는 앱 import 경로가 없어 수집 오류가 났고, 지침대로 `backends/`에서 재실행해 통과했다.
 - 새 테스트는 추가하지 않았다. 기존 실제 SQLite 캐시·만료·장부 및 서비스 경로 검사를 사용했다.
+
+## 감사 9 — 최종 이벤트 없는 스트림 종료 처리 완료
+
+- 기존 SSE 읽기를 `src/api/chatStream.ts`로 분리했다. final/interrupt/치명 오류 이전 EOF는 예외로 처리해 기존 hook의 오류 콜백으로 전달한다. 부분 오류는 최종 이벤트를 기다리고 사용자 취소는 실패로 표시하지 않는다.
+- CRLF와 UTF-8 청크 분할을 처리하고 종료 이벤트 뒤 후속 이벤트는 무시한다. reader는 종료·예외 시 취소하고 잠금을 해제한다.
+- 옮긴 기존 구현에서 새 검사 3 failed/1 passed를 확인했다. 수정 후 프론트 **6 passed**(업로드 2 + 스트림 4), TypeScript·Vite 빌드 성공. 새 의존성은 없다.
+- 실제 Chrome/Playwright 화면에서 `a:b.pdf` 업로드→서버 `a_b.pdf` 응답→적재 요청의 `file_name=["a_b.pdf"]`→완료 화면을 확인했다.
+- 같은 화면에서 progress만 보내고 끝나는 SSE를 주입해 오류 문구 표시와 로딩 말풍선 제거를 확인했다. 스크린샷 `output/playwright/early-eof.png`를 읽어 화면도 확인했다. API 응답은 브라우저 route 대역이며 실서비스/유료 API 통합 결과는 아니다.
+- CLI 세션 연결 문제를 해결하는 과정에서 여러 실행 시도가 있었으며, 성공한 실제 화면 검사와 단위 검사만 위 결과로 기록했다. 브라우저 로그·스크린샷은 개인 `.git/info/exclude`에 제외했다.
