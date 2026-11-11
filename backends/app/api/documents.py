@@ -82,7 +82,7 @@ async def register(req: FileNames, st: AppState = Depends(get_state)):
             path = uploads.file_path(name)
             doc_name = Path(path.name).stem
             pages = await asyncio.to_thread(uploads.pdf_pages, path)
-            arts = uploads.split_articles(doc_name, pages)
+            arts = uploads.split_articles(doc_name, pages, file_name=path.name)
             if not arts:
                 raise uploads.UploadError(f"{path.name}: 텍스트를 읽지 못했습니다(스캔 PDF는 지원하지 않습니다)")
             previous = uploads.all_docs().get(path.name)

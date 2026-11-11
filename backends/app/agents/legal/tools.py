@@ -5,6 +5,8 @@ LangGraph 서브그래프와 채팅 에이전트가 함께 쓴다. 외부 연결
 from __future__ import annotations
 
 import re
+from pathlib import Path
+from urllib.parse import unquote
 from dataclasses import dataclass
 
 from app.core.law.corpus import Corpus, load_corpus
@@ -34,6 +36,8 @@ def short_name(key: str) -> str:
     """'전자금융거래법시행령:11-4' → '시행령 제11조의4', ':annex-1' → '시행령 별표 1'."""
     law, rest = key.split(":", 1)
     pre = SHORT.get(law, law)
+    if law.startswith("upload@"):
+        pre = Path(unquote(law.removeprefix("upload@"))).stem
     if rest.startswith("annex-"):
         n = rest[6:].split("-")
         return f"{pre} 별표 {n[0]}" + (f"의{n[1]}" if len(n) > 1 else "")

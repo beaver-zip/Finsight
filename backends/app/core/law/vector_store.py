@@ -121,7 +121,12 @@ class LawVectors:
                      levels: list[str] | None = None) -> list[ChunkHit]:
         col = self.client.collections.get(COLLECTION)
         vec = (await embed([query]))[0].tolist()
-        names = {d.get("vector_name", d["doc_name"]): d["doc_name"] for d in uploads.all_docs().values()}
+        names: dict[str, tuple[str, str] | None] = {}
+        for file_name, d in uploads.all_docs().items():
+            name = d.get("vector_name", d["doc_name"])
+            names[name] = None if name in names else (file_name, d["doc_name"])
+        # 구형 벡터의 문서명 자체가 중복이면 원문을 구분할 수 없어 재등록이 필요하다.
+        names = {k: v for k, v in names.items() if v is not None}
         flt = Filter.by_property("source").not_equal("upload")
         if names:
             flt = flt | (Filter.by_property("source").equal("upload")
@@ -134,8 +139,11 @@ class LawVectors:
         out = []
         for o in res.objects:
             p = o.properties
-            law_name = names.get(p["law_name"], p["law_name"]) if p["source"] == "upload" else p["law_name"]
-            out.append(ChunkHit(Chunk(p["chunk_key"], p["article_key"], law_name, p["level"], p["source"],
+            law_name, akey, ckey = p["law_name"], p["article_key"], p["chunk_key"]
+            if p["source"] == "upload":
+                file_name, law_name = names[p["law_name"]]
+                akey, ckey = uploads.article_key(file_name, akey), uploads.article_key(file_name, ckey)
+            out.append(ChunkHit(Chunk(ckey, akey, law_name, p["level"], p["source"],
                                       p["heading"], p["text"], p.get("effective_date"), p.get("para")),
                                 float(o.metadata.score or 0.0)))
         return out

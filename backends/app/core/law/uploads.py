@@ -2,7 +2,7 @@
 
 - 파일은 data/uploads/files/에, 나눈 조문은 data/uploads/articles.json에 둔다(조문 조회용). 벡터는 Weaviate에
   level="내규", source="upload"로 넣는다. 내규는 형식이 제각각이라 참조 해석기·인용 그래프에는 넣지 않는다(설계 결정).
-- 조문 key는 "<문서명(공백 제거)>:<조 번호>"다. 조 머리("제N조(제목)")가 없는 문서는 쪽 단위로 나누고 쪽 번호를 조 번호로 쓴다.
+- 등록 조문 key는 "upload@<URL 인코딩한 저장 파일명>:<조 번호>"다. 조 머리("제N조(제목)")가 없는 문서는 쪽 단위로 나누고 쪽 번호를 조 번호로 쓴다.
 """
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ import threading
 import tempfile
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import quote
 
 from app.core.law.parser import CIRCLED, clean, key_name, split_paragraphs
 from app.domain.models import Article, Paragraph
@@ -66,9 +67,22 @@ def pdf_pages(path: Path) -> list[str]:
         return [p.get_text("text") for p in doc]
 
 
-def split_articles(doc_name: str, pages: list[str]) -> list[Article]:
+def document_key(file_name: str) -> str:
+    return "upload@" + quote(safe_name(file_name), safe="")
+
+
+def article_key(file_name: str, key: str) -> str:
+    return f"{document_key(file_name)}:{key.split(':', 1)[1]}"
+
+
+def _article_keys(file_name: str, article: dict) -> dict:
+    return {**article, "key": article_key(file_name, article["key"]),
+            "paragraphs": [{**p, "key": article_key(file_name, p["key"])} for p in article["paragraphs"]]}
+
+
+def split_articles(doc_name: str, pages: list[str], *, file_name: str | None = None) -> list[Article]:
     """조 머리("제N조(제목)")로 나누고, 없으면 쪽 단위로 나눈다. 같은 조 번호가 다시 나오면 앞 조문에 붙인다."""
-    law = key_name(doc_name)
+    law = document_key(file_name) if file_name is not None else key_name(doc_name)
     text = "\n".join(pages)
     heads = list(_HEAD.finditer(text))
     out: dict[str, Article] = {}
@@ -101,7 +115,10 @@ def split_articles(doc_name: str, pages: list[str]) -> list[Article]:
 @lru_cache(maxsize=1)
 def _load() -> dict[str, dict]:
     """{파일 이름: {"doc_name", "articles": [...]}}"""
-    return json.loads(STORE.read_text()) if STORE.exists() else {}
+    data = json.loads(STORE.read_text()) if STORE.exists() else {}
+    for name, doc in data.items():
+        doc["articles"] = [_article_keys(name, a) for a in doc["articles"]]
+    return data
 
 
 def all_docs() -> dict[str, dict]:
@@ -121,7 +138,7 @@ def put(file_name: str, doc_name: str, articles: list[Article], chunk_count: int
     with _lock:
         data = dict(_load())
         data[file_name] = {"doc_name": doc_name, "chunk_count": chunk_count,
-                           "articles": [a.model_dump(mode="json") for a in articles]}
+                           "articles": [_article_keys(file_name, a.model_dump(mode="json")) for a in articles]}
         if vector_name is not None:
             data[file_name]["vector_name"] = vector_name
         UPLOAD_DIR.mkdir(parents=True, exist_ok=True)

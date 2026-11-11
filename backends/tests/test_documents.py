@@ -82,7 +82,7 @@ def test_upload_register_list_delete_roundtrip(store):
     r = c.post("/rag/register", json={"file_name": ["내규.pdf"]})
     reg = r.json()["registered"][0]
     assert reg["articles"] == 2 and reg["chunk_count"] == 2 and all(x.source == "upload" for x in vec.chunks)
-    assert uploads.get_article("내규:1").paragraphs[0].text.startswith("Article 1")
+    assert uploads.get_article(uploads.document_key("내규.pdf") + ":1").paragraphs[0].text.startswith("Article 1")
     files = c.get("/rag/show_files_in_collection").json()["unique_file_name_and_chunk"]
     assert files == [{"file_name": "내규.pdf", "chunk_count": 2, "articles": 2}]
     assert c.post("/files/download-pdf/", json={"file_name": "내규.pdf"}).content[:4] == b"%PDF"
@@ -141,13 +141,13 @@ async def test_failed_replacement_preserves_old_document_and_retry(store, monkey
     assert result["failed"] and not result["registered"]
     assert uploads.all_docs() == before
     assert vec.chunks == old_chunks
-    assert uploads.get_article("내규:1").paragraphs[0].text == "Old policy."
+    assert uploads.get_article(uploads.document_key("내규.pdf") + ":1").paragraphs[0].text == "Old policy."
 
     result = await documents.register(documents.FileNames(file_name=["내규.pdf"]), st)
     assert not result["failed"] and result["registered"][0]["chunk_count"] == 2
     assert sorted(c.text for c in vec.chunks) == ["Another new page.", "New policy.", "Other policy."]
     assert uploads.all_docs()["다른.pdf"] == before["다른.pdf"]
-    assert uploads.get_article("내규:1").paragraphs[0].text == "New policy."
+    assert uploads.get_article(uploads.document_key("내규.pdf") + ":1").paragraphs[0].text == "New policy."
 
 
 def test_metadata_replace_failure_keeps_disk_and_cache(store, monkeypatch):
@@ -166,7 +166,7 @@ def test_metadata_replace_failure_keeps_disk_and_cache(store, monkeypatch):
         uploads.put("내규.pdf", "내규", uploads.split_articles("내규", ["New policy."]), 1)
     assert uploads.STORE.read_bytes() == before
     uploads._load.cache_clear()
-    assert uploads.get_article("내규:1").paragraphs[0].text == "Old policy."
+    assert uploads.get_article(uploads.document_key("내규.pdf") + ":1").paragraphs[0].text == "Old policy."
     assert set(store.iterdir()) == before_files
 
 
@@ -188,7 +188,7 @@ async def test_cleanup_failure_does_not_revert_successful_replacement(store, mon
     assert result["registered"] and not result["failed"]
     active = uploads.all_docs()["내규.pdf"]["vector_name"]
     assert [c.text for c in vec.chunks if c.law_name == active] == ["New policy."]
-    assert uploads.get_article("내규:1").paragraphs[0].text == "New policy."
+    assert uploads.get_article(uploads.document_key("내규.pdf") + ":1").paragraphs[0].text == "New policy."
 
 
 @pytest.mark.asyncio
@@ -223,7 +223,7 @@ async def test_search_only_uses_published_vectors_and_restores_display_name(stor
     for name, source, level in [("기존", "upload", "내규"), ("active-generation", "upload", "내규"),
                                 ("incomplete-generation", "upload", "내규"), ("내규", "upload", "내규"),
                                 ("법령", "lawgo", "법률")]:
-        chunk = vector_store.Chunk("key", "article", name, level, source, "heading", name)
+        chunk = vector_store.Chunk("legacy:1:p0", "legacy:1", name, level, source, "heading", name)
         rows.append(NS(properties=asdict(chunk), metadata=NS(score=1.0)))
 
     # SDK 필터를 평가하는 외부 저장소 대역. 실제 LawVectors.hybrid 경로를 호출한다.
@@ -249,6 +249,11 @@ async def test_search_only_uses_published_vectors_and_restores_display_name(stor
     hits = await vec.hybrid("policy", levels=levels)
     assert [h.chunk.law_name for h in hits] == (["기존", "내규"] if levels else ["기존", "내규", "법령"])
     assert [h.chunk.text for h in hits][:2] == ["기존", "active-generation"]
+    assert hits[0].chunk.article_key == uploads.document_key("기존.pdf") + ":1"
+    assert hits[1].chunk.chunk_key == uploads.document_key("내규.pdf") + ":1:p0"
+    uploads.put("중복.pdf", "중복", [], 1, vector_name="active-generation")
+    hits = await vec.hybrid("policy")
+    assert [h.chunk.law_name for h in hits] == ["기존", "법령"]
     monkeypatch.setattr(uploads, "all_docs", lambda: {})
     hits = await vec.hybrid("policy")
     assert [h.chunk.law_name for h in hits] == ["법령"]
@@ -317,6 +322,18 @@ async def test_replacement_with_isolated_weaviate(store, monkeypatch):
             assert sorted(h.chunk.text for h in hits) == ["Another new page.", "New policy.", "Other policy."]
             await documents.delete_file(documents.FileName(file_name="내규.pdf"), st)
             assert [h.chunk.text for h in await vec.hybrid("policy", alpha=1, levels=["내규"])] == ["Other policy."]
+            uploads.save_file("다 른.pdf", _pdf("Spaced policy."))
+            uploads.save_file("테스트법.pdf", _pdf("Uploaded law policy."))
+            result = await documents.register(documents.FileNames(file_name=["다 른.pdf", "테스트법.pdf"]), st)
+            assert not result["failed"]
+            hits = await vec.hybrid("policy", alpha=1, levels=["내규"])
+            assert len({h.chunk.article_key for h in hits}) == 3
+            for h in hits:
+                assert uploads.get_article(h.chunk.article_key).paragraphs[0].text == h.chunk.text
+            from app.core.law.corpus import Corpus
+            corpus = Corpus(docs=[], delegations=[], articles={law.key: law}, annexes={})
+            assert corpus.get(law.key).source == "lawgo"
+            assert all(corpus.get(h.chunk.article_key).source == "upload" for h in hits)
         finally:
             if await client.collections.exists(collection):
                 await client.collections.delete(collection)
@@ -346,5 +363,44 @@ async def test_reingest_preserves_uploaded_vector_identity(store, monkeypatch, v
     result = await ingest.ingest(fetch=False, graph=False)
     assert result["vectors"]["upload_chunks"] == 1
     assert vec.chunks[0].law_name == (vector_name or "내규")
-    assert vec.chunks[0].article_key == arts[0].key
+    assert vec.chunks[0].article_key == uploads.article_key("내규.pdf", arts[0].key)
     assert vec.chunks[0].text == "Policy text."
+
+
+@pytest.mark.asyncio
+async def test_registered_article_ids_do_not_collide_with_other_uploads_or_laws(store):
+    from app.core.law.corpus import Corpus
+    from app.agents.legal.tools import short_name
+
+    vec = FakeVectors()
+    st = NS(law_tools=NS(vectors=vec))
+    names = ["내 규.pdf", "내규.pdf", "전자금융거래법.pdf", "내규 .pdf"]
+    for i, name in enumerate(names):
+        uploads.save_file(name, _pdf(f"Policy {i}."))
+    result = await documents.register(documents.FileNames(file_name=names), st)
+    assert not result["failed"]
+    docs = uploads.all_docs()
+    keys = [docs[n]["articles"][0]["key"] for n in names]
+    assert len(set(keys)) == len(names)
+    law = uploads.split_articles("전자금융거래법", ["Official law."])[0]
+    corpus = Corpus(docs=[], delegations=[], articles={law.key: law}, annexes={})
+    assert corpus.get(law.key).paragraphs[0].text == "Official law."
+    for i, (name, key) in enumerate(zip(names, keys)):
+        assert key != law.key and corpus.get(key).paragraphs[0].text == f"Policy {i}."
+        assert short_name(key).endswith("제1조") and docs[name]["doc_name"] in short_name(key)
+    await documents.delete_file(documents.FileName(file_name=names[0]), st)
+    assert corpus.get(keys[0]) is None
+    assert all(corpus.get(k) is not None for k in keys[1:])
+    assert corpus.get(law.key).paragraphs[0].text == "Official law."
+
+
+def test_legacy_article_keys_are_adapted_without_rewriting_store(store):
+    import json
+
+    article = uploads.split_articles("내 규", ["Legacy policy."])[0]
+    old = json.dumps({"내 규.pdf": {"doc_name": "내 규", "articles": [article.model_dump(mode="json")]}}, ensure_ascii=False)
+    uploads.STORE.write_text(old)
+    canonical = uploads.document_key("내 규.pdf") + ":1"
+    assert uploads.get_article(canonical).paragraphs[0].text == "Legacy policy."
+    assert uploads.get_article(canonical).paragraphs[0].key == canonical + ":p0"
+    assert uploads.STORE.read_text() == old
