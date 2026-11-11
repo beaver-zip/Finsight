@@ -10,6 +10,9 @@ from app.domain.models import FinancialLine, FinancialSnapshot
 _PERIOD = {"11013": ("1분기 누적", "1–3월"), "11012": ("반기 누적", "1–6월"),
            "11014": ("3분기 누적", "1–9월"), "11011": ("사업연도", "1–12월")}
 _SJ = {"BS", "IS", "CIS", "CF", "SCE"}
+_CACHE_NS = "dart.fin.v2"          # 기존 무기한 캐시를 재사용하지 않는다
+_CACHE_TTL = 3_600
+_EMPTY_TTL = 300
 
 
 def to_amount(s: str | None) -> Decimal | None:
@@ -56,11 +59,11 @@ async def _fetch(dart: DartClient, corp_code: str, bsns_year: int, reprt_code: s
 
 async def get_snapshot(dart: DartClient, corp_code: str, bsns_year: int, reprt_code: str, *,
                        acc_mt: int | None = 12, expected_rcept_no: str | None = None) -> FinancialSnapshot | None:
-    """만료 없는 캐시. 캐시된 rcept_no가 최종본(expected_rcept_no)과 다르면(정정 공시) 다시 받는다."""
+    """정상 응답은 1시간, 빈 응답은 5분 캐시. 알려진 정정 접수번호가 다르면 즉시 다시 받는다."""
     cache = get_cache()
     for fs_div in ("CFS", "OFS"):
         key = f"{corp_code}:{bsns_year}:{reprt_code}:{fs_div}"
-        rows = await cache.get("dart.fin", key)
+        rows = await cache.get(_CACHE_NS, key)
         if rows is not None and rows and expected_rcept_no and rows[0].get("rcept_no") != expected_rcept_no:
             rows = None
         if rows is None:
@@ -68,7 +71,7 @@ async def get_snapshot(dart: DartClient, corp_code: str, bsns_year: int, reprt_c
                 rows = await _fetch(dart, corp_code, bsns_year, reprt_code, fs_div)
             except DartNoData:
                 rows = []
-            await cache.set("dart.fin", key, rows)
+            await cache.set(_CACHE_NS, key, rows, ttl_s=_CACHE_TTL if rows else _EMPTY_TTL)
         if rows:
             return FinancialSnapshot(corp_code=corp_code, rcept_no=rows[0]["rcept_no"], bsns_year=bsns_year,
                                      reprt_code=reprt_code, fs_div=fs_div,  # type: ignore[arg-type]

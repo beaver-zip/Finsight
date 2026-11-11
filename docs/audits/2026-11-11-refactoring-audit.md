@@ -4,7 +4,7 @@
 - 대상: `beaver-zip/Finsight`, `main`, `ca0ecdc1fe2f3707b80007e2cd687a00af01b438`
 - 방법: `ponytail-audit`에 따른 코드 검토 및 일부 함수의 격리 재현 검사
 - 가정: 개인 사용자가 로컬 서버 한 개를 실행하고 내부 작업은 병렬 처리
-- 상태: 3번은 **수정 완료 (`20559f7`), 로컬·실제 Weaviate 회귀 검증 통과**. 나머지 10개 항목은 미수정. [3번 검증 기록](../testing/2026-11-11-document-replacement.md)을 참고한다.
+- 상태: 3번은 **수정 완료 (`20559f7`), 로컬·실제 Weaviate 회귀 검증 통과**. 1번도 수정·로컬 회귀 검증 완료([기록](../testing/2026-11-11-financial-cache.md)). 나머지 9개 항목은 미수정. [3번 검증 기록](../testing/2026-11-11-document-replacement.md)을 참고한다.
 - 후속 문서: [테스트·실행 계획](../plans/2026-11-11-refactoring-test-plan.md), [기준선 검사 결과](../testing/2026-11-11-baseline.md), [인수인계](../plans/2026-11-11-handoff.md)
 
 ## 서비스와 감사 범위
@@ -19,7 +19,7 @@ README, 의존성·Docker·CI 설정, API 진입점, 문서 저장·검색, 채�
 
 ### 1. 재무 캐시가 정정 공시·나중에 공개된 데이터를 놓침
 
-- **상태/근거 수준:** 미수정. 빈 응답 캐시와 이전 접수번호 재사용을 격리 재현. 실제 DART 연동은 미검증.
+- **상태/근거 수준:** 수정·로컬 회귀 검증 완료. 실제 SQLite와 DART 응답 대역을 사용해 수정 전 실패 및 수정 후 통과를 확인했다. 기간별 최종 접수번호 전달과 정상 1시간/빈 응답 5분 만료를 적용했다. 실제 DART 연동은 미검증. [검증 기록](../testing/2026-11-11-financial-cache.md).
 - **위치:** `backends/app/core/dart/financials.py:57–76`, `backends/app/core/dart/history.py:94–99`.
 - **역할:** 기간별 재무제표를 캐시하고 정정 접수번호가 달라지면 갱신한다.
 - **문제:** 호출부가 `expected_rcept_no`를 전달하지 않는다. 데이터 없음 응답 `[]`도 만료 없이 저장한다.

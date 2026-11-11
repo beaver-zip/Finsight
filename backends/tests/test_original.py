@@ -114,7 +114,7 @@ async def test_history_fills_from_original_and_derives_quarter(monkeypatch):
     api = {(2023, 3): snap(2023, 3, 600 * B, 300 * B)}
     orig = {(2023, 1): snap(2023, 1, 200 * B, 100 * B), (2023, 2): snap(2023, 2, 450 * B, 220 * B)}
 
-    async def fake_snap(dart, corp, y, q, acc):
+    async def fake_snap(dart, corp, y, q, acc, *, expected_rcept_no=None):
         return api.get((y, q))
 
     async def fake_original(dart, corp, periods, acc):

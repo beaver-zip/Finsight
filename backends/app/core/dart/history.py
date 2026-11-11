@@ -1,4 +1,4 @@
-"""분기 이력(2016년~)과 연간·누적 항목. 모두 fnlttSinglAcntAll 스냅샷(만료 없는 캐시)에서 계산한다.
+"""분기 이력(2016년~)과 연간·누적 항목. 모두 fnlttSinglAcntAll 스냅샷에서 계산한다.
 
 분기 손익은 1~3분기는 보고서의 3개월 값, 4분기는 사업보고서 연간 값에서 3분기 누적을 뺀 값이다.
 재무상태 항목(지배주주 자본 등)은 각 분기 말 값이다.
@@ -91,12 +91,22 @@ class History:
         return {r.key: r for r in self.quarters}
 
 
-async def _snap(dart: DartClient, corp_code: str, y: int, q: int, acc_mt: int | None) -> FinancialSnapshot | None:
+async def _snap(dart: DartClient, corp_code: str, y: int, q: int, acc_mt: int | None,
+                *, expected_rcept_no: str | None = None) -> FinancialSnapshot | None:
     try:
-        return await dart_fin.get_snapshot(dart, corp_code, y, RC[q], acc_mt=acc_mt)
+        return await dart_fin.get_snapshot(dart, corp_code, y, RC[q], acc_mt=acc_mt,
+                                           expected_rcept_no=expected_rcept_no)
     except Exception as e:  # noqa: BLE001
         log.info("스냅샷 실패 %s %s %s: %s", corp_code, y, RC[q], e)
         return None
+
+
+async def _reports(dart: DartClient, corp_code: str, first_year: int, acc_mt: int | None) -> dict:
+    try:
+        return await original.periodic_reports(dart, corp_code, first_year, acc_mt)
+    except Exception as e:  # noqa: BLE001
+        log.info("정기보고서 목록 실패 %s: %s", corp_code, e)
+        return {}
 
 
 async def from_original(dart: DartClient, corp_code: str, periods: list[tuple[int, int]],
@@ -104,11 +114,7 @@ async def from_original(dart: DartClient, corp_code: str, periods: list[tuple[in
     """재무 API에 없는 분기를 정기보고서 원문 재무제표에서 읽는다(원문이 없는 분기는 건너뛴다)."""
     if not periods:
         return {}
-    try:
-        reports = await original.periodic_reports(dart, corp_code, min(y for y, _ in periods), acc_mt)
-    except Exception as e:  # noqa: BLE001
-        log.info("정기보고서 목록 실패 %s: %s", corp_code, e)
-        return {}
+    reports = await _reports(dart, corp_code, min(y for y, _ in periods), acc_mt)
     out = {}
     for y, q in periods:
         rc = reports.get((y, RC[q]))
@@ -133,7 +139,9 @@ async def quarterly_history(dart: DartClient, corp_code: str, last: tuple[int, i
     최근 ORIGINAL_QUARTERS 분기 중 재무 API가 비어 있는 분기는 원문 재무제표로 채운다(use_original).
     """
     periods = quarters_between((first_year, 1), last)
-    snaps_list = await asyncio.gather(*(_snap(dart, corp_code, y, q, acc_mt) for y, q in periods))
+    reports = await _reports(dart, corp_code, first_year, acc_mt) if periods else {}
+    snaps_list = await asyncio.gather(*(_snap(dart, corp_code, y, q, acc_mt,
+                                            expected_rcept_no=reports.get((y, RC[q]))) for y, q in periods))
     snaps = {p: s for p, s in zip(periods, snaps_list) if s is not None}
     if use_original:
         recent = set(periods[-ORIGINAL_QUARTERS:])
@@ -166,9 +174,12 @@ async def quarterly_history(dart: DartClient, corp_code: str, last: tuple[int, i
 async def cumulative_items(dart: DartClient, corp_code: str, periods: list[tuple[int, int]], *,
                            acc_mt: int | None = 12, snapshots: dict | None = None) -> dict[tuple[int, int], dict]:
     """(연도, 분기) → 누적 손익·현금흐름·기말 재무상태 항목. 분기 4는 사업연도 전체."""
+    missing = [p for p in periods if (snapshots or {}).get(p) is None]
+    reports = await _reports(dart, corp_code, min(y for y, _ in missing), acc_mt) if missing else {}
     out = {}
     for y, q in periods:
-        s = (snapshots or {}).get((y, q)) or await _snap(dart, corp_code, y, q, acc_mt)
+        s = (snapshots or {}).get((y, q)) or await _snap(dart, corp_code, y, q, acc_mt,
+                                                      expected_rcept_no=reports.get((y, RC[q])))
         if s is None:
             continue
         row = {it: cum_value(s, it) for it in CASH_ITEMS}
