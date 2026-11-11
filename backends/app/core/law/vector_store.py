@@ -14,6 +14,7 @@ from weaviate.classes.config import Configure, DataType, Property, Tokenization
 from weaviate.classes.query import Filter, HybridFusion, MetadataQuery
 
 from app.core.embeddings import embed
+from app.core.law import uploads
 from app.domain.annex_table import split_annex
 from app.domain.models import Annex, Article
 from app.settings import get_settings
@@ -120,14 +121,21 @@ class LawVectors:
                      levels: list[str] | None = None) -> list[ChunkHit]:
         col = self.client.collections.get(COLLECTION)
         vec = (await embed([query]))[0].tolist()
-        flt = Filter.by_property("level").contains_any(levels) if levels else None
+        names = {d.get("vector_name", d["doc_name"]): d["doc_name"] for d in uploads.all_docs().values()}
+        flt = Filter.by_property("source").not_equal("upload")
+        if names:
+            flt = flt | (Filter.by_property("source").equal("upload")
+                         & Filter.by_property("law_name").contains_any(list(names)))
+        if levels:
+            flt = flt & Filter.by_property("level").contains_any(levels)
         res = await col.query.hybrid(query=query, vector=vec, alpha=alpha, limit=limit,
                                      query_properties=["heading^2", "text"], fusion_type=HybridFusion.RELATIVE_SCORE,
                                      filters=flt, return_metadata=MetadataQuery(score=True))
         out = []
         for o in res.objects:
             p = o.properties
-            out.append(ChunkHit(Chunk(p["chunk_key"], p["article_key"], p["law_name"], p["level"], p["source"],
+            law_name = names.get(p["law_name"], p["law_name"]) if p["source"] == "upload" else p["law_name"]
+            out.append(ChunkHit(Chunk(p["chunk_key"], p["article_key"], law_name, p["level"], p["source"],
                                       p["heading"], p["text"], p.get("effective_date"), p.get("para")),
                                 float(o.metadata.score or 0.0)))
         return out

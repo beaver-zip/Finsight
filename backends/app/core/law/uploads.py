@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import re
 import threading
+import tempfile
 from functools import lru_cache
 from pathlib import Path
 
@@ -115,13 +116,23 @@ def get_article(key: str) -> Article | None:
     return None
 
 
-def put(file_name: str, doc_name: str, articles: list[Article], chunk_count: int) -> None:
+def put(file_name: str, doc_name: str, articles: list[Article], chunk_count: int,
+        *, vector_name: str | None = None) -> None:
     with _lock:
         data = dict(_load())
         data[file_name] = {"doc_name": doc_name, "chunk_count": chunk_count,
                            "articles": [a.model_dump(mode="json") for a in articles]}
+        if vector_name is not None:
+            data[file_name]["vector_name"] = vector_name
         UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-        STORE.write_text(json.dumps(data, ensure_ascii=False))
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=UPLOAD_DIR, delete=False) as f:
+            temp = Path(f.name)
+            try:
+                f.write(json.dumps(data, ensure_ascii=False))
+                f.close()
+                temp.replace(STORE)
+            finally:
+                temp.unlink(missing_ok=True)
         _load.cache_clear()
 
 

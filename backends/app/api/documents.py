@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import replace
 from pathlib import Path
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
@@ -38,6 +40,13 @@ def _vectors(st: AppState):
     if st.law_tools is None:
         raise HTTPException(503, "법령 검색 DB(Weaviate·Neo4j)가 연결되지 않았습니다")
     return st.law_tools.vectors
+
+
+async def _discard_vectors(vec, name: str) -> None:
+    try:
+        await vec.delete_doc(name)
+    except Exception:
+        log.exception("비활성 문서 벡터 정리 실패: %s", name)
 
 
 @files_router.post("/upload-pdf", summary="PDF 업로드(저장만, 적재는 /rag/register)")
@@ -76,10 +85,18 @@ async def register(req: FileNames, st: AppState = Depends(get_state)):
             arts = uploads.split_articles(doc_name, pages)
             if not arts:
                 raise uploads.UploadError(f"{path.name}: 텍스트를 읽지 못했습니다(스캔 PDF는 지원하지 않습니다)")
-            await vec.delete_doc(doc_name)              # 같은 문서를 다시 올리면 바꾼다
-            chunks = [c for a in arts for c in article_chunks(a)]
-            n = await vec.add(chunks)
-            uploads.put(path.name, doc_name, arts, n)
+            previous = uploads.all_docs().get(path.name)
+            vector_name = f"upload:{uuid4()}"
+            # 검색은 메타데이터가 가리키는 세대만 사용한다. 기존 세대는 전환 후 정리한다.
+            chunks = [replace(c, law_name=vector_name) for a in arts for c in article_chunks(a)]
+            try:
+                n = await vec.add(chunks)
+                uploads.put(path.name, doc_name, arts, n, vector_name=vector_name)
+            except BaseException:
+                await _discard_vectors(vec, vector_name)
+                raise
+            if previous:
+                await _discard_vectors(vec, previous.get("vector_name", previous["doc_name"]))
             done.append({"file_name": path.name, "articles": len(arts), "chunk_count": n})
         except uploads.UploadError as e:
             failed.append({"file_name": name, "reason": str(e)})
@@ -105,6 +122,6 @@ async def delete_file(req: FileName, st: AppState = Depends(get_state)):
     d = uploads.all_docs().get(name)
     if d is None:
         raise HTTPException(404, f"올린 문서가 아닙니다: {req.file_name}")
-    await _vectors(st).delete_doc(d["doc_name"])
+    await _vectors(st).delete_doc(d.get("vector_name", d["doc_name"]))
     uploads.remove(name)
     return {"deleted": name}

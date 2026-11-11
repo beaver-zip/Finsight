@@ -108,3 +108,201 @@ def test_admin_token(monkeypatch):
         return {"ok": True}
     monkeypatch.setattr(admin.law_ingest, "reset", fake_reset)
     assert c.post("/admin/legal/reset", headers={"X-Admin-Token": "t0ken"}).json() == {"ok": True}
+
+
+@pytest.mark.parametrize("failure", ["embedding", "partial", "metadata"])
+@pytest.mark.asyncio
+async def test_failed_replacement_preserves_old_document_and_retry(store, monkeypatch, failure):
+    from copy import deepcopy
+
+    vec = FakeVectors()
+    st = NS(law_tools=NS(vectors=vec))
+    uploads.save_file("내규.pdf", _pdf("Old policy."))
+    uploads.save_file("다른.pdf", _pdf("Other policy."))
+    await documents.register(documents.FileNames(file_name=["내규.pdf", "다른.pdf"]), st)
+    before = deepcopy(uploads.all_docs())
+    old_chunks = list(vec.chunks)
+    uploads.save_file("내규.pdf", _pdf("New policy.\fAnother new page."))
+
+    async def fail_add(chunks):
+        if failure == "partial":
+            vec.chunks.append(chunks[0])
+        raise RuntimeError("injected insert failure")
+
+    def fail_put(*args, **kwargs):
+        raise OSError("injected metadata failure")
+
+    with monkeypatch.context() as patch:
+        if failure == "metadata":
+            patch.setattr(uploads, "put", fail_put)
+        else:
+            patch.setattr(vec, "add", fail_add)
+        result = await documents.register(documents.FileNames(file_name=["내규.pdf"]), st)
+    assert result["failed"] and not result["registered"]
+    assert uploads.all_docs() == before
+    assert vec.chunks == old_chunks
+    assert uploads.get_article("내규:1").paragraphs[0].text == "Old policy."
+
+    result = await documents.register(documents.FileNames(file_name=["내규.pdf"]), st)
+    assert not result["failed"] and result["registered"][0]["chunk_count"] == 2
+    assert sorted(c.text for c in vec.chunks) == ["Another new page.", "New policy.", "Other policy."]
+    assert uploads.all_docs()["다른.pdf"] == before["다른.pdf"]
+    assert uploads.get_article("내규:1").paragraphs[0].text == "New policy."
+
+
+def test_metadata_replace_failure_keeps_disk_and_cache(store, monkeypatch):
+    from pathlib import Path
+
+    old = uploads.split_articles("내규", ["Old policy."])
+    uploads.put("내규.pdf", "내규", old, 1)
+    before = uploads.STORE.read_bytes()
+    before_files = set(store.iterdir())
+
+    def fail_replace(self, target):
+        raise OSError("injected rename failure")
+
+    monkeypatch.setattr(Path, "replace", fail_replace)
+    with pytest.raises(OSError, match="rename failure"):
+        uploads.put("내규.pdf", "내규", uploads.split_articles("내규", ["New policy."]), 1)
+    assert uploads.STORE.read_bytes() == before
+    uploads._load.cache_clear()
+    assert uploads.get_article("내규:1").paragraphs[0].text == "Old policy."
+    assert set(store.iterdir()) == before_files
+
+
+@pytest.mark.asyncio
+async def test_cleanup_failure_does_not_revert_successful_replacement(store, monkeypatch):
+    vec = FakeVectors()
+    st = NS(law_tools=NS(vectors=vec))
+    # 기존 vector_name 없는 메타데이터도 교체할 수 있어야 한다.
+    old = uploads.split_articles("내규", ["Old policy."])
+    uploads.put("내규.pdf", "내규", old, 1)
+    await vec.add([c for a in old for c in documents.article_chunks(a)])
+    uploads.save_file("내규.pdf", _pdf("New policy."))
+
+    async def fail_delete(name):
+        raise RuntimeError("injected cleanup failure")
+
+    monkeypatch.setattr(vec, "delete_doc", fail_delete)
+    result = await documents.register(documents.FileNames(file_name=["내규.pdf"]), st)
+    assert result["registered"] and not result["failed"]
+    active = uploads.all_docs()["내규.pdf"]["vector_name"]
+    assert [c.text for c in vec.chunks if c.law_name == active] == ["New policy."]
+    assert uploads.get_article("내규:1").paragraphs[0].text == "New policy."
+
+
+@pytest.mark.asyncio
+async def test_failed_first_registration_can_be_retried(store, monkeypatch):
+    vec = FakeVectors()
+    st = NS(law_tools=NS(vectors=vec))
+    uploads.save_file("내규.pdf", _pdf("New policy."))
+
+    async def fail_add(chunks):
+        vec.chunks.append(chunks[0])
+        raise RuntimeError("injected partial failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(vec, "add", fail_add)
+        result = await documents.register(documents.FileNames(file_name=["내규.pdf"]), st)
+    assert result["failed"] and uploads.all_docs() == {} and vec.chunks == []
+    result = await documents.register(documents.FileNames(file_name=["내규.pdf"]), st)
+    assert result["registered"] and len(vec.chunks) == 1
+
+
+@pytest.mark.parametrize("levels", [None, ["내규"]])
+@pytest.mark.asyncio
+async def test_search_only_uses_published_vectors_and_restores_display_name(store, monkeypatch, levels):
+    from dataclasses import asdict
+    from unittest.mock import AsyncMock
+    import numpy as np
+    from app.core.law import vector_store
+
+    uploads.put("기존.pdf", "기존", [], 1)
+    uploads.put("내규.pdf", "내규", [], 1, vector_name="active-generation")
+    rows = []
+    for name, source, level in [("기존", "upload", "내규"), ("active-generation", "upload", "내규"),
+                                ("incomplete-generation", "upload", "내규"), ("내규", "upload", "내규"),
+                                ("법령", "lawgo", "법률")]:
+        chunk = vector_store.Chunk("key", "article", name, level, source, "heading", name)
+        rows.append(NS(properties=asdict(chunk), metadata=NS(score=1.0)))
+
+    # SDK 필터를 평가하는 외부 저장소 대역. 실제 LawVectors.hybrid 경로를 호출한다.
+    def matches(flt, props):
+        if hasattr(flt, "filters"):
+            children = [matches(f, props) for f in flt.filters]
+            return all(children) if type(flt).__name__ == "_FilterAnd" else any(children)
+        value = props[flt.target]
+        if flt.operator.value == "Equal":
+            return value == flt.value
+        if flt.operator.value == "NotEqual":
+            return value != flt.value
+        assert flt.operator.value == "ContainsAny"
+        return value in flt.value
+
+    async def hybrid(**kwargs):
+        return NS(objects=[row for row in rows if matches(kwargs["filters"], row.properties)])
+
+    col = NS(query=NS(hybrid=hybrid))
+    client = NS(collections=NS(get=lambda _: col))
+    monkeypatch.setattr(vector_store, "embed", AsyncMock(return_value=np.array([[1.0, 0.0]])))
+    vec = vector_store.LawVectors(client)
+    hits = await vec.hybrid("policy", levels=levels)
+    assert [h.chunk.law_name for h in hits] == (["기존", "내규"] if levels else ["기존", "내규", "법령"])
+    assert [h.chunk.text for h in hits][:2] == ["기존", "active-generation"]
+    monkeypatch.setattr(uploads, "all_docs", lambda: {})
+    hits = await vec.hybrid("policy")
+    assert [h.chunk.law_name for h in hits] == ["법령"]
+
+
+@pytest.mark.live
+@pytest.mark.asyncio
+async def test_replacement_with_isolated_weaviate(store, monkeypatch):
+    """명시한 로컬 테스트 DB에 고유 컬렉션을 만들고 마지막에 그 컬렉션만 삭제한다."""
+    import os
+    from uuid import uuid4
+    from unittest.mock import AsyncMock
+    import numpy as np
+    import weaviate
+    from app.core.law import vector_store
+
+    http_port = os.environ.get("FINSIGHT_TEST_WEAVIATE_HTTP_PORT")
+    grpc_port = os.environ.get("FINSIGHT_TEST_WEAVIATE_GRPC_PORT")
+    if not http_port or not grpc_port:
+        pytest.skip("격리 Weaviate의 HTTP/GRPC 포트를 명시해야 합니다")
+    collection = f"UploadTest{uuid4().hex}"
+    monkeypatch.setattr(vector_store, "COLLECTION", collection)
+    monkeypatch.setattr(vector_store, "embed", AsyncMock(side_effect=lambda texts: np.array([[1., 0., 0.] for _ in texts])))
+    client = weaviate.use_async_with_local(port=int(http_port), grpc_port=int(grpc_port))
+    async with vector_store.LawVectors(client) as vec:
+        try:
+            await vec.reset()
+            st = NS(law_tools=NS(vectors=vec))
+            uploads.save_file("내규.pdf", _pdf("Old policy."))
+            uploads.save_file("다른.pdf", _pdf("Other policy."))
+            result = await documents.register(documents.FileNames(file_name=["내규.pdf", "다른.pdf"]), st)
+            assert not result["failed"]
+            uploads.save_file("내규.pdf", _pdf("New policy.\fAnother new page."))
+            add = vec.add
+
+            async def partial_failure(chunks):
+                await add(chunks[:1])
+                hits = await vec.hybrid("policy", alpha=1)
+                assert sorted(h.chunk.text for h in hits) == ["Old policy.", "Other policy."]
+                raise RuntimeError("injected failure after real insertion")
+
+            with monkeypatch.context() as patch:
+                patch.setattr(vec, "add", partial_failure)
+                result = await documents.register(documents.FileNames(file_name=["내규.pdf"]), st)
+            assert result["failed"]
+            hits = await vec.hybrid("policy", alpha=1)
+            assert sorted(h.chunk.text for h in hits) == ["Old policy.", "Other policy."]
+            result = await documents.register(documents.FileNames(file_name=["내규.pdf"]), st)
+            assert not result["failed"]
+            hits = await vec.hybrid("policy", alpha=1)
+            assert sorted(h.chunk.text for h in hits) == ["Another new page.", "New policy.", "Other policy."]
+            assert {h.chunk.law_name for h in hits} == {"내규", "다른"}
+            await documents.delete_file(documents.FileName(file_name="내규.pdf"), st)
+            assert [h.chunk.text for h in await vec.hybrid("policy", alpha=1)] == ["Other policy."]
+        finally:
+            if await client.collections.exists(collection):
+                await client.collections.delete(collection)
