@@ -4,8 +4,8 @@ services:
   weaviate:
     image: cr.weaviate.io/semitechnologies/weaviate:1.32.4
     ports:
-      - 8090:8080
-      - 50051:50051
+      - "127.0.0.1:8090:8080"
+      - "127.0.0.1:50051:50051"
     restart: on-failure:0
     volumes:
       - ./weaviate_data:/var/lib/weaviate
@@ -27,8 +27,8 @@ services:
   neo4j:
     image: neo4j:5.26-community
     ports:
-      - 7474:7474 # 브라우저 http://localhost:7474
-      - 7687:7687 # bolt
+      - "127.0.0.1:7474:7474" # 브라우저 http://localhost:7474
+      - "127.0.0.1:7687:7687" # bolt
     restart: on-failure:0
     volumes:
       - ./neo4j_data:/data

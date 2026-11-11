@@ -36,3 +36,9 @@
 - 업로드 요청·응답 해석을 `src/api/documents.ts`로 분리하고, UI의 다음 단계는 로컬 File 객체 대신 서버의 `uploaded: string[]`를 전달한다. 서버가 `a:b.pdf`를 `a_b.pdf`로 바꿔도 그대로 `/rag/register`에 전달한다.
 - 새 의존성 없이 Node 내장 test runner와 이미 설치된 Vite의 TS 변환을 사용한다. `npm test`와 CI 프론트 검사 단계를 추가했다.
 - 프론트 API 검사 **2 passed**(변경 파일명·일반 파일·부분 거절, HTTP 400 전체 거절). `npm run build` 성공. API fetch는 대역이며 실제 브라우저 왕복은 후속 UI 검사에서 확인한다.
+
+## 감사 10 — 로컬 DB 포트 범위 제한 완료
+
+- Weaviate HTTP/gRPC와 Neo4j HTTP/Bolt 공개 포트 4개를 `127.0.0.1`에 바인딩한다. 컨테이너 내부 포트 및 backend의 서비스명 기반 주소는 유지한다.
+- `docker compose config --no-env-resolution --format json`을 파싱해 네 포트의 `host_ip`, 외부·내부 포트와 backend 연결 주소를 검증했다. `.env`의 비밀값을 해석하거나 출력하지 않았다.
+- 실제 사용자 컨테이너를 재생성하거나 볼륨을 수정하지 않았다. 실행 중인 기존 컨테이너에는 다음 재생성 때 반영된다. Neo4j 실접속·다른 기기의 접근 차단은 실행하지 않았다.
