@@ -88,13 +88,17 @@ def doc_text(doc: Article | Annex) -> str:
 class LawTools:
     vectors: LawVectors
     graph: LawGraph
-    corpus: Corpus
+
+    @property
+    def corpus(self) -> Corpus:
+        return load_corpus()
 
     @classmethod
     async def open(cls) -> LawTools:
         v = LawVectors()
         await v.__aenter__()
-        return cls(v, LawGraph(), load_corpus())
+        load_corpus()
+        return cls(v, LawGraph())
 
     async def close(self) -> None:
         await self.vectors.__aexit__(None, None, None)
@@ -110,8 +114,9 @@ class LawTools:
         for h, s in zip(hits, scores):
             best[h.chunk.article_key] = max(best.get(h.chunk.article_key, 0.0), s)
         out = []
+        corpus = self.corpus
         for key, s in sorted(best.items(), key=lambda x: -x[1])[:k]:
-            doc = self.corpus.get(key)
+            doc = corpus.get(key)
             if doc is not None:
                 out.append(ArticleHit(article=doc, score=s))
         return out
@@ -123,7 +128,8 @@ class LawTools:
                                limit: int = 20) -> list[ArticleHit]:
         """시드에서 참조·위임 엣지를 hops까지 따라간 후보(가까운 순 limit개)를 질문으로 리랭크하고 점수 − λ·hops로 정렬."""
         cands = await self.graph.expand(keys, hops=hops, limit=limit)
-        docs = [(c, self.corpus.get(c.key)) for c in cands]
+        corpus = self.corpus
+        docs = [(c, corpus.get(c.key)) for c in cands]
         docs = [(c, d) for c, d in docs if d is not None]
         q = normalize(query)
         scores = await rerank(q, [focus_text(d, q) for _, d in docs])

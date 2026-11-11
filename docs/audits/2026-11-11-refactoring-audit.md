@@ -49,7 +49,7 @@ README, 의존성·Docker·CI 설정, API 진입점, 문서 저장·검색, 채�
 
 ### 4. 법령 재적재 후 실행 중인 객체가 이전 본문을 사용함
 
-- **상태/근거 수준:** 미수정. 객체 참조와 캐시 무효화 경로의 정적 분석.
+- **상태/근거 수준:** 수정·회귀 검증 완료. 같은 LawTools 객체가 재적재 후 신규 코퍼스를 조회하도록 변경했다([검증 기록](../testing/2026-11-11-remaining-fixes.md)).
 - **위치:** `backends/app/agents/legal/tools.py:87–120`, `backends/app/core/law/corpus.py:52–61`, `backends/app/core/law/ingest.py`.
 - **역할:** 메모리의 법령 본문을 벡터 검색 결과와 연결한다.
 - **문제:** `load_corpus.cache_clear()`는 이미 `LawTools.corpus`에 저장한 객체를 교체하지 않는다.
