@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
@@ -89,12 +90,34 @@ def company_digest(rep: CompanyReport, limit_facts: int = 160) -> str:
     return "\n".join(lines)
 
 
+NEWS_SHIFT = 100      # 뉴스 과업 기사(n1~)와 겹치지 않을 만큼 큰 수
+
+
+def shift_news_ids(rep: CompanyReport, by: int = NEWS_SHIFT) -> CompanyReport:
+    """리포트 기사 id를 n1 → n101로 민다. 기사 목록, 본문 블록의 [n1]·[n1, n2] 표기, news_ids를 함께 바꾼다."""
+    new = lambda nid: f"n{int(nid[1:]) + by}"
+    mark = lambda m: re.sub(r"n(\d+)", lambda k: new(k.group(0)), m.group(0))
+
+    def walk(v, key=None):
+        if key == "news_ids":
+            return [new(x) for x in v]
+        if isinstance(v, dict):
+            return {k: walk(x, k) for k, x in v.items()}
+        if isinstance(v, list):
+            return [walk(x) for x in v]
+        return re.sub(r"\[n\d+(?:\s*,\s*n\d+)*\]", mark, v) if isinstance(v, str) else v
+    d = rep.model_dump(mode="json")
+    d["news"] = [{**n, "id": new(n["id"])} for n in d["news"]]
+    d["draft"] = walk(d["draft"]) if d["draft"] else None
+    return CompanyReport.model_validate(d)
+
+
 async def run_company(instruction: str, corp: CorpProfile, build: ReportBuilder, *,
-                      skip_news: bool = False) -> tuple[SubResult, EvidencePart]:
+                      shift_news: bool = False) -> tuple[SubResult, EvidencePart]:
     out = await build(corp.corp_code)
     rep = CompanyReport.model_validate(out["json"])
-    if skip_news:       # 같은 질문의 뉴스 과업도 기사에 n1~을 붙인다. 리포트(캐시) 기사와 ID가 겹치지 않게 뺀다
-        rep = rep.model_copy(update={"news": []})
+    if shift_news:      # 같은 질문의 뉴스 과업도 n1~을 쓴다. 리포트(캐시) 기사와 겹치면 출처·검증 본문이 바뀐다
+        rep = shift_news_ids(rep)
     if rep.filing is None or not rep.metrics:
         return (SubResult(agent="company", content="", error=f"{corp.corp_name}의 정기보고서·재무 자료가 없다"),
                 EvidencePart())

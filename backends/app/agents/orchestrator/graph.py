@@ -159,8 +159,8 @@ def fan_out(state: OrchestratorState):
     tasks = [t for t in r.sub_tasks if t.agent == "legal" or state.get("corp") is not None]
     if not tasks:
         return "finish"
-    skip_news = any(t.agent == "news" for t in tasks)
-    return [Send("run_task", {"task": t, "corp": state.get("corp"), "skip_news": skip_news}) for t in tasks]
+    shift_news = any(t.agent == "news" for t in tasks)
+    return [Send("run_task", {"task": t, "corp": state.get("corp"), "shift_news": shift_news}) for t in tasks]
 
 
 async def run_task(payload: dict, config: RunnableConfig) -> dict:
@@ -174,7 +174,7 @@ async def run_task(payload: dict, config: RunnableConfig) -> dict:
         elif t.agent == "company":
             _progress("chat.company", f"{corp.corp_name} 리포트 확인(없으면 새로 만든다)")
             res, ev = await run_company(t.instruction, corp, d["report_builder"],
-                                        skip_news=payload.get("skip_news", False))
+                                        shift_news=payload.get("shift_news", False))
         else:
             _progress("chat.news", f"{corp.corp_name} 최근 기사 검색")
             res, ev = await run_news(t.instruction, corp, dart=d["dart"], http=d["http"])

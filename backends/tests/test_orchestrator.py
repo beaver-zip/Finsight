@@ -90,11 +90,12 @@ async def test_company_ambiguous_interrupts_then_resumes(monkeypatch, patched):
     assert seen == ["00126380"] and out["answer"].markdown == "삼성전자 실적 요약입니다."
 
 
-async def test_company_and_news_do_not_share_article_ids(monkeypatch, patched):
+@pytest.mark.parametrize("news_fails", [False, True])
+async def test_company_and_news_do_not_share_article_ids(monkeypatch, patched, news_fails):
     # 리포트(캐시) 기사와 새 뉴스 기사가 둘 다 n1이면 출처·검증 본문이 뒤의 기사로 덮인다
     from datetime import date
 
-    from app.domain.models import Citation, CompanyReport, Metric, NewsItem, PeriodicFiling
+    from app.domain.models import Block, Citation, CompanyReport, Headline, Metric, NewsItem, PeriodicFiling, ReportDraft
 
     async def r(msgs, mode="auto"):
         return Route(intent="composite", company="삼성전자", clarification=None,
@@ -111,16 +112,20 @@ async def test_company_and_news_do_not_share_article_ids(monkeypatch, patched):
     monkeypatch.setattr(G.dart_corp, "get_profile", profile)
     old = NewsItem(id="n1", title="지난주 기사A", url="https://a.kr/old", source="A", published_at=None)
     new = NewsItem(id="n1", title="오늘 기사B", url="https://b.kr/new", source="B", published_at=None)
+    draft = ReportDraft(**{h: Headline(text="") for h in ReportDraft.HEADS}, **{g: [] for g in ReportDraft.GROUPS})
+    draft.market_c = [Block(id="market_c.1", head="시각", text="수주가 늘었다 [n1, n2].", news_ids=["n1", "n2"])]
     rep = CompanyReport(corp=corp, metrics={"op.2Q26": Metric(id="op", label="영업이익", period="2Q26", value=None,
                                                              unit="KRW", formula="", text="1조원")},
                         filing=PeriodicFiling(rcept_no="20260814000001", report_nm="반기보고서 (2026.06)",
                                               rcept_dt=date(2026, 8, 14), bsns_year=2026, reprt_code="11012"),
-                        news=[old])
+                        news=[old], draft=draft)
 
     async def build(code):
         return {"html": "", "json": rep.model_dump(mode="json")}
 
     async def news(instr, corp, **kw):
+        if news_fails:
+            raise RuntimeError("Tavily 429")
         return (SubResult(agent="news", content="[n1] 오늘 기사B",
                           citations=[Citation(kind="news", id="n1", label=new.title, url=new.url)]),
                 EvidencePart(news=[new], news_text={"n1": "기사B 본문"}))
@@ -129,7 +134,8 @@ async def test_company_and_news_do_not_share_article_ids(monkeypatch, patched):
 
     async def synth(q, results, issues=None, prev=None):
         seen["results"] = results
-        return [Claim(id="c1", text="오늘 기사가 나왔습니다.", news_ids=["n1"])]
+        return [Claim(id="c1", text="오늘 기사가 나왔습니다 [n1].", news_ids=["n1"]),
+                Claim(id="c2", text="지난주에는 수주가 늘었습니다 [n101].", news_ids=["n101"])]
     monkeypatch.setattr(G, "synthesize", synth)
 
     async def check(claims, ev, judged=None):
@@ -138,11 +144,16 @@ async def test_company_and_news_do_not_share_article_ids(monkeypatch, patched):
     monkeypatch.setattr(G.verifier, "verify", check)
     g = G.build_orchestrator(InMemorySaver())
     out = await g.ainvoke({"messages": [HumanMessage("삼성전자 실적이랑 뉴스")], "mode": "auto"},
-                          config=_cfg("t-cn", report_builder=build))
+                          config=_cfg(f"t-cn-{news_fails}", report_builder=build))
     company = next(x for x in seen["results"] if x.agent == "company")
-    assert "기사A" not in company.content and all(c.kind != "news" for c in company.citations)
-    assert seen["ev"].news["n1"].url == new.url and seen["ev"].news_text["n1"] == "기사B 본문"
-    assert [c.url for c in out["answer"].citations if c.kind == "news"] == [new.url]
+    assert "[n101] 지난주 기사A" in company.content and "수주가 늘었다 [n101, n102]." in company.content
+    assert "[n1" not in company.content.replace("[n10", "")
+    assert [c.id for c in company.citations if c.kind == "news"] == ["n101"]
+    ev = seen["ev"]
+    assert ev.news["n101"].url == old.url                  # 뉴스 과업이 실패해도 리포트 기사는 남는다
+    if not news_fails:
+        assert ev.news["n1"].url == new.url and ev.news_text["n1"] == "기사B 본문"
+        assert sorted(c.url for c in out["answer"].citations if c.kind == "news") == [old.url, new.url]
 
 
 async def test_chat_intent_guides(monkeypatch, patched):
