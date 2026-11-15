@@ -21,7 +21,7 @@ from app.core.peers import PeerRow
 from app.domain import fmt
 from app.domain.accounts import CASH_LIKE, DEBT_LIKE
 from app.domain.ksic import industry_short
-from app.domain.sources import outlet_name
+from app.domain.sources import clean_name, clean_title, outlet_name
 from app.domain.models import CorpProfile, Disclosure, Metric, NewsItem, PeriodicFiling
 
 log = logging.getLogger(__name__)
@@ -84,10 +84,6 @@ class ReportData:
 # ---------------- 도구
 def f(v: Decimal | float | None) -> float | None:
     return None if v is None else float(v)
-
-
-def clean_name(name: str) -> str:
-    return re.sub(r"\(주\)|㈜|주식회사", "", name or "").strip()
 
 
 def per_label(key: str) -> str:
@@ -1045,18 +1041,6 @@ def _rel(c: dict) -> None:
 # ---------------- 뉴스·공시 목록
 KEY_DISCLOSURE = ("잠정", "기업설명회", "자기주식", "배당", "합병", "분할", "유상증자", "무상증자", "전환사채", "신주인수권",
                   "공급계약", "투자", "소송", "최대주주", "주식소각", "자산양수도", "영업양수도")
-
-
-def clean_title(t: str, outlet: str | None = None) -> str:
-    """검색 결과 제목 끝의 매체 표기(' - 조선비즈', ' | 한경매거진&북', ':: 공감언론 뉴시스 ::')를 뗀다."""
-    t = re.sub(r"\s*::[^:]*::\s*$", "", t or "").strip()
-    for _ in range(2):
-        m = re.search(r"\s+[-|│ㅣ]\s+([^-|│ㅣ]{1,20})$", t)
-        tail = m.group(1) if m else ""
-        if m and ((outlet and outlet in tail) or re.search(
-                r"일보|신문|뉴스|경제|비즈|매거진|방송|TV|타임스|헤럴드|미디어|저널|데일리|투데이|포스트|&북|\.(?:com|kr|net)", tail)):
-            t = t[:m.start()].strip()
-    return t
 
 
 def _news_disc(c: dict) -> None:

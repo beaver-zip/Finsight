@@ -19,7 +19,7 @@ from app.agents.company.analysis import analyze, make_inputs
 from app.agents.company.collect import collect
 from app.agents.company.render import render_report
 from app.agents.company.state import CompanyState
-from app.agents.news.pipeline import NewsConfig, run_pipeline
+from app.agents.news.pipeline import run_pipeline
 from app.agents.verifier import Evidence, verify
 from app.core import llm
 from app.core.dart import filings as dart_filings
@@ -91,15 +91,8 @@ async def get_disclosures(state: CompanyState, config: RunnableConfig) -> dict:
 async def get_news(state: CompanyState, config: RunnableConfig) -> dict:
     deps = _deps(config)
     _progress("news.search", "측면별 질의 3개 검색 중")
-    res = await run_pipeline(state["corp"], state.get("disclosures", []), http=deps["http"],
-                             config=deps.get("news_config") or NewsConfig())
-    texts = {}
-    by_url = {c.url: c for c in res.candidates}
-    for it in res.items:
-        c = by_url.get(it.url)
-        if c is not None:
-            texts[it.id] = c.text
-    return {"news": res.items, "news_note": res.note, "news_text": texts}
+    res = await run_pipeline(state["corp"], state.get("disclosures", []), http=deps["http"])
+    return {"news": res.items, "news_note": res.note, "news_text": res.texts}
 
 
 @guarded("analyze", {"data": None, "metrics": {}})

@@ -8,7 +8,8 @@ import httpx
 import pytest
 
 from app.agents.company import writer
-from app.agents.company.analysis import Consensus, Inputs, analyze, clean_title, make_inputs, ret_between
+from app.agents.company.analysis import Consensus, Inputs, analyze, make_inputs, ret_between
+from app.domain.sources import clean_title
 from app.agents.company.collect import Collected
 from app.agents.company.render import Text, news_html, render_report, table_html, ticks
 from app.core.dart.history import QRow, qkey

@@ -23,7 +23,7 @@ from app.domain.models import (ASPECT_GROUPS, ASPECTS, ArticleAnalysis, ArticleJ
                                NewsItem, QueryPlan)
 from app.domain.news_rank import (DEDUP_THRESHOLD, WEIGHTS, Candidate, cluster, coverage, mmr_select,
                                   representatives, score)
-from app.domain.sources import domain_of, source_tier
+from app.domain.sources import clean_name, domain_of, source_tier
 
 log = logging.getLogger(__name__)
 MAX_CANDIDATES = 60
@@ -62,7 +62,7 @@ aspect에는 그 묶음의 첫 번째 측면을 그대로 쓴다."""
 
 async def plan_queries(corp: CorpProfile, disclosures: list[Disclosure], groups: list[int], *,
                        missing: list[str] | None = None, previous: list[str] | None = None) -> list[QueryPlan]:
-    name = re.sub(r"\(주\)|㈜|주식회사", "", corp.corp_name).strip()
+    name = clean_name(corp.corp_name)
     titles = [d.report_nm for d in disclosures[:15]]
     wanted = [ASPECT_GROUPS[g] for g in groups]
     prompt = (f"기업명: {name}\n업종: {industry_name(corp.induty_code or '') or '정보 없음'}\n"
@@ -237,7 +237,7 @@ async def run_pipeline(corp: CorpProfile, disclosures: list[Disclosure], *, http
 async def _run_pipeline(corp: CorpProfile, disclosures: list[Disclosure], *, http: httpx.AsyncClient,
                         config: NewsConfig, now: datetime | None) -> NewsResult:
     now = now or datetime.now(KST)
-    name = re.sub(r"\(주\)|㈜|주식회사", "", corp.corp_name).strip()
+    name = clean_name(corp.corp_name)
     disc_dates = {d.rcept_no: d.rcept_dt for d in disclosures}
 
     plans = await plan_queries(corp, disclosures, [0, 1, 2])

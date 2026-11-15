@@ -231,6 +231,11 @@ class Annex(BaseModel):
     text: str
     related_article: str | None = None
 
+    @property
+    def no_label(self) -> str:
+        """"전자금융거래법시행령:annex-1-2" → "1의2"."""
+        return self.key.split(":annex-")[-1].replace("-", "의")
+
 
 class ArticleHit(BaseModel):
     article: Article | Annex
