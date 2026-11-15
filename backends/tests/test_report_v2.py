@@ -143,6 +143,18 @@ def test_ni_hero_does_not_mix_consolidated_net_income():
     assert hero["kind"] == "ni" and gap.key not in hero["keys"] and max(hero["vals"]) < 1e15
 
 
+def test_key_cards_survive_index_failure_and_share_mcap_text():
+    inp = _inputs()
+    inp.index_px = []                                     # 지수 조회 실패
+    for sh in inp.shares.values():
+        sh.common_out *= 2                                # 시가총액 10조~100조 구간
+    data = analyze(inp)
+    cards = {k["label"]: k for k in data.key_data}
+    assert cards["52주 최고"]["value"] == data.facts["hi52.now"].text
+    assert cards["12개월 수익률"]["sub"] == "" and cards["12개월 수익률"]["sub_sign"] is None
+    assert cards["시가총액"]["value"] == data.facts["mcap.now"].text
+
+
 def test_cfo_to_net_income_blank_when_cfo_negative():
     inp = _inputs()
     inp.cum[(2026, 2)]["cfo"] = D(-1e11)

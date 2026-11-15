@@ -93,7 +93,6 @@ class ReportData:
     disclosures: list[dict] = field(default_factory=list)
     facts: dict[str, Metric] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
-    extra: dict[str, Any] = field(default_factory=dict)
 
     def to_json(self) -> dict:
         return {"corp": self.corp, "made": self.made, "asof": self.asof, "latest": self.latest,
@@ -242,11 +241,12 @@ def _key_data(c: dict) -> None:
         F.add(f"ret{lab}", "now", f"{lab} 주가 수익률", fmt.spct(r), r, "%")
     fq = (inp.filing.bsns_year, _q_of(inp.filing.reprt_code))
     sh = inp.shares.get(fq)
-    mcap = None
+    mcap, mcap_txt = None, "–"
     if sh:
         k = _split_factor(inp, _q_end(fq))                # 시세는 분할을 반영한 값이다
         mcap = last * sh.common_out * k + (inp.pref_px * sh.pref_out * k if inp.pref_px and sh.pref_out else 0)
-        F.add("mcap", "now", "시가총액(보통주+우선주)", fmt.money(mcap, 0) if mcap >= 1e14 else fmt.money(mcap), mcap, "KRW")
+        mcap_txt = fmt.money(mcap, 0) if mcap >= 1e14 else fmt.money(mcap)
+        F.add("mcap", "now", "시가총액(보통주+우선주)", mcap_txt, mcap, "KRW")
         if inp.pref_px and sh.pref_out:
             disc = (1 - inp.pref_px / last) * 100
             c["pref_disc"] = disc
@@ -256,10 +256,10 @@ def _key_data(c: dict) -> None:
     data.key_data = [
         {"label": "주가", "value": fmt.won(last), "sub": f"{fmt.spct(day, 2)} {fmt.md(last_d)}" if day is not None else fmt.md(last_d),
          "sign": day},
-        {"label": "시가총액", "value": (f"{mcap / 1e12:,.0f}조원" if mcap and mcap >= 1e13 else fmt.money(mcap)) if mcap else "–",
+        {"label": "시가총액", "value": mcap_txt if mcap else "–",
          "sub": "보통주·우선주 합산" if (sh and sh.pref_out and inp.pref_px) else "보통주"},
     ]
-    data.extra["key_tail"] = {"r12": r12, "rel12": rel12, "hi": hi, "lo": lo, "index": inp.index_name}
+    c["key_tail"] = {"r12": r12, "rel12": rel12, "hi": hi, "lo": lo, "index": inp.index_name}
 
 
 def _q_of(rc: str) -> int:
@@ -1062,6 +1062,12 @@ def _events(c: dict) -> None:
 # ---------------- 1년 주가
 def _rel(c: dict) -> None:
     inp, data = c["inp"], c["data"]
+    tail = c.get("key_tail")
+    if tail:              # 52주 최고·최저는 지수와 상관없으니 지수 차트가 빠져도 카드는 둔다
+        data.key_data.append({"label": "12개월 수익률", "value": fmt.spct(tail["r12"]),
+                              "sub": f"{tail['index']} 대비 {fmt.pp(tail['rel12'])}" if tail["rel12"] is not None else "",
+                              "sub_sign": tail["rel12"]})
+        data.key_data.append({"label": "52주 최고", "value": fmt.won(tail["hi"]), "sub": f"최저 {fmt.won(tail['lo'])}"})
     px, ix = inp.px, inp.index_px
     if not px or not ix:
         return
@@ -1080,11 +1086,6 @@ def _rel(c: dict) -> None:
     data.charts["rel"] = {"rows": rows, "index": inp.index_name, "name": c["name"], "events": ev, "title": title,
                           "subtitle": f"{fmt.ym(yr[0][0])} {yr[0][0].day}일=100" + (", 원 표시는 잠정실적 발표일" if ev else ""),
                           "source": "Yahoo Finance"}
-    tail = data.extra.get("key_tail")
-    if tail:
-        data.key_data.append({"label": "12개월 수익률", "value": fmt.spct(tail["r12"]),
-                              "sub": f"{tail['index']} 대비 {fmt.pp(tail['rel12'])}", "sub_sign": tail["rel12"]})
-        data.key_data.append({"label": "52주 최고", "value": fmt.won(tail["hi"]), "sub": f"최저 {fmt.won(tail['lo'])}"})
 
 
 # ---------------- 뉴스·공시 목록
