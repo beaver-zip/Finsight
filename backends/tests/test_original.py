@@ -92,6 +92,16 @@ def test_three_month_and_cumulative_columns():
     assert (op.thstrm_amount, op.thstrm_add_amount) == (1000 * 10 ** 6, -3000 * 10 ** 6)
 
 
+def test_triangle_negative_amounts():
+    # 원문 표는 음수를 △로도 쓴다. 첫 데이터 줄이 모두 △여도 머리글로 세지 않는다.
+    loss = IS_3M.replace("<TD>1,000</TD><TD>(3,000)</TD><TD>900</TD><TD>2,500</TD>",
+                         "<TD>△1,000</TD><TD>△ 3,000</TD><TD>△900</TD><TD>△2,500</TD>")
+    s = _snap(_doc(loss), "11014")
+    op = find_line(s, "operating_income").line
+    assert (op.thstrm_amount, op.thstrm_add_amount) == (-1000 * 10 ** 6, -3000 * 10 ** 6)
+    assert find_line(s, "net_income").line.thstrm_add_amount == 2400 * 10 ** 6
+
+
 def test_separate_statements_fallback_and_euc_kr():
     xml = _doc(IS_CUM).replace("2. 연결재무제표", "2. 재무제표")
     rows, fs = original.parse_statements(xml, "11012", "r")

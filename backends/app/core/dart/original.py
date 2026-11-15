@@ -27,7 +27,7 @@ from app.domain.accounts import normalize_name
 
 log = logging.getLogger(__name__)
 NO_ID = "-표준계정코드 미사용-"
-VERSION = 2                        # 파서를 고치면 올린다(캐시 키에 들어가 다시 읽는다)
+VERSION = 3                        # 파서를 고치면 올린다(캐시 키에 들어가 다시 읽는다)
 _UNIT = re.compile(r"단위\s*:\s*(백만원|천원|원)")
 _UNITS = {"백만원": Decimal(10) ** 6, "천원": Decimal(1000), "원": Decimal(1)}
 _TERM = re.compile(r"제\s*(\d+)\s*기")
@@ -35,7 +35,7 @@ _AMT = re.compile(r"^\(?-?[\d,]+(?:\.\d+)?\)?$")
 
 
 def _amount(tok: str, k: Decimal) -> Decimal | None:
-    t = tok.replace(" ", "")
+    t = tok.replace(" ", "").replace("△", "-")      # 원문 표는 음수를 △로도 쓴다
     if not _AMT.match(t):
         return None
     neg = t.startswith("(") or t.startswith("-")
