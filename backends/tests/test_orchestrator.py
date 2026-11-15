@@ -73,7 +73,7 @@ async def test_company_ambiguous_interrupts_then_resumes(monkeypatch, patched):
     monkeypatch.setattr(G.dart_corp, "get_profile", profile)
     seen = []
 
-    async def company(instr, corp, build, **kw):
+    async def company(corp, build, **kw):
         seen.append(corp.corp_code)
         return SubResult(agent="company", content="사실표 …"), EvidencePart()
     monkeypatch.setattr(G, "run_company", company)
@@ -88,6 +88,80 @@ async def test_company_ambiguous_interrupts_then_resumes(monkeypatch, patched):
     assert it["question"] == "어느 기업인가요?" and it["options"] == ["삼성전자 (005930)", "삼성SDI (006400)"]
     out = await g.ainvoke(Command(resume="삼성전자 (005930)"), config=cfg)
     assert seen == ["00126380"] and out["answer"].markdown == "삼성전자 실적 요약입니다."
+
+
+async def test_router_clarification_synthesizes_rewritten_question(monkeypatch, patched):
+    # 되묻기 답("카카오뱅크")이 마지막 사람 메시지가 되어도 합성은 라우터가 풀어 쓴 질문을 받는다
+    async def r(msgs, mode="auto"):
+        if len(msgs) == 1:
+            return Route(intent="company", company=None, clarification="어느 회사인가요?",
+                         sub_tasks=[SubTask(agent="company", instruction="그 회사 영업이익 추이")])
+        return Route(intent="company", company="카카오뱅크", clarification=None,
+                     sub_tasks=[SubTask(agent="company", instruction="카카오뱅크 영업이익 추이")])
+    monkeypatch.setattr(G, "route", r)
+    corp = CorpProfile(corp_code="01133217", corp_name="카카오뱅크", stock_code="323410")
+
+    async def cands(dart, name):
+        return [{"corp_code": corp.corp_code, "corp_name": corp.corp_name, "stock_code": corp.stock_code}]
+
+    async def profile(dart, code):
+        return corp
+    monkeypatch.setattr(G, "listed_candidates", cands)
+    monkeypatch.setattr(G.dart_corp, "get_profile", profile)
+
+    async def company(*a, **kw):
+        return SubResult(agent="company", content="사실표 …"), EvidencePart()
+    monkeypatch.setattr(G, "run_company", company)
+    asked = []
+
+    async def synth(q, results, issues=None, prev=None):
+        asked.append(q)
+        return [Claim(id="c1", text="영업이익은 늘었습니다.")]
+    monkeypatch.setattr(G, "synthesize", synth)
+    g = G.build_orchestrator(InMemorySaver())
+    cfg = _cfg("t-clar", report_builder=None)
+    out = await g.ainvoke({"messages": [HumanMessage("그 회사 영업이익 추이는?")], "mode": "auto"}, config=cfg)
+    assert out["__interrupt__"][0].value["question"] == "어느 회사인가요?"
+    out = await g.ainvoke(Command(resume="카카오뱅크"), config=cfg)
+    assert asked == ["카카오뱅크 영업이익 추이"] and out["answer"].markdown == "영업이익은 늘었습니다."
+
+
+async def test_listed_candidates_prefers_listed_by_market_cap(monkeypatch):
+    # 2026-10-12: 이름이 같은 비상장 '삼성'이 있어도 상장사 후보를 시가총액 순으로 보여 준다
+    rows = [{"corp_code": "1", "corp_name": "삼성", "stock_code": None},
+            {"corp_code": "2", "corp_name": "삼성SDI", "stock_code": "006400"},
+            {"corp_code": "3", "corp_name": "삼성전자", "stock_code": "005930"}]
+
+    async def corp_list(dart):
+        return rows
+    monkeypatch.setattr(G.dart_corp, "corp_list", corp_list)
+    monkeypatch.setattr("app.core.peers.load_universe",
+                        lambda: [{"stock_code": "005930", "mcap_approx": 400}, {"stock_code": "006400", "mcap_approx": 30}])
+    names = lambda cs: [c["corp_name"] for c in cs]
+    assert names(await G.listed_candidates(None, "삼성")) == ["삼성전자", "삼성SDI"]
+    assert names(await G.listed_candidates(None, "삼성 전자")) == ["삼성전자"]
+    assert names(await G.listed_candidates(None, "006400")) == ["삼성SDI"]          # 6자리는 종목코드
+    assert await G.listed_candidates(None, "없는회사") == []
+
+
+async def test_unresolved_company_keeps_only_legal_task(monkeypatch, patched):
+    async def r(msgs, mode="auto"):
+        return Route(intent="composite", company="없는회사", clarification=None,
+                     sub_tasks=[SubTask(agent="company", instruction="실적"), SubTask(agent="legal", instruction="CISO")])
+    monkeypatch.setattr(G, "route", r)
+
+    async def cands(dart, name):
+        return []
+    monkeypatch.setattr(G, "listed_candidates", cands)
+    g = G.build_orchestrator(InMemorySaver())
+    cfg = _cfg("t-none")
+    out = await g.ainvoke({"messages": [HumanMessage("없는회사 실적과 CISO 의무")], "mode": "auto"}, config=cfg)
+    for _ in range(G.MAX_ASKS + 1):
+        assert "찾지 못했습니다" in out["__interrupt__"][0].value["question"]
+        out = await g.ainvoke(Command(resume="또 없는회사"), config=cfg)
+    assert "__interrupt__" not in out and "clarify: 대상 기업을 정하지 못했다" in out["errors"]
+    assert [t.agent for t in out["route"].sub_tasks] == ["legal"] and [x.agent for x in out["results"]] == ["legal"]
+    assert "시행령 별표 1" in out["answer"].markdown
 
 
 @pytest.mark.parametrize("news_fails", [False, True])
@@ -123,7 +197,7 @@ async def test_company_and_news_do_not_share_article_ids(monkeypatch, patched, n
     async def build(code):
         return {"html": "", "json": rep.model_dump(mode="json")}
 
-    async def news(instr, corp, **kw):
+    async def news(corp, **kw):
         if news_fails:
             raise RuntimeError("Tavily 429")
         return (SubResult(agent="news", content="[n1] 오늘 기사B",
@@ -189,6 +263,33 @@ async def test_failed_claims_are_revised_then_finalized(monkeypatch, patched):
     assert n["synth"] == 1 + G.MAX_REVISIONS
     md = out["answer"].markdown
     assert "결론입니다." in md and "과장된 문장입니다. (근거 불충분)" in md and "근거 없는" not in md
+
+
+async def test_failed_revise_is_not_retried(monkeypatch, patched):
+    # 재작성이 실패하면 다음 검증은 캐시로 같은 실패를 내므로, 실패할 재작성을 다시 부르지 않고 끝낸다
+    async def r(msgs, mode="auto"):
+        return Route(intent="composite", company=None, sub_tasks=[SubTask(agent="legal", instruction="a"),
+                                                                   SubTask(agent="legal", instruction="b")],
+                     clarification=None)
+    monkeypatch.setattr(G, "route", r)
+    n = {"synth": 0}
+
+    async def synth(q, results, issues=None, prev=None):
+        n["synth"] += 1
+        if issues:
+            raise G.llm.StructuredOutputError("재작성 실패")
+        return [Claim(id="c1", text="결론입니다."), Claim(id="c2", text="근거 없는 문장입니다.")]
+    monkeypatch.setattr(G, "synthesize", synth)
+
+    async def fail(claims, ev, judged=None):
+        return VerificationResult(passed=False, issues=[VerificationIssue(claim_id="c2", type="unsupported",
+                                                                          detail="근거 없음")])
+    monkeypatch.setattr(G.verifier, "verify", fail)
+    g = G.build_orchestrator(InMemorySaver())
+    out = await g.ainvoke({"messages": [HumanMessage("x")], "mode": "auto"}, config=_cfg("t-rev"))
+    assert n["synth"] == 2 and any(e.startswith("revise:") for e in out["errors"])
+    md = out["answer"].markdown
+    assert "결론입니다." in md and "근거 없는" not in md
 
 
 async def test_second_turn_resets_results(monkeypatch, patched):
