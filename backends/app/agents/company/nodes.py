@@ -145,6 +145,9 @@ async def regulatory_check(state: CompanyState, config: RunnableConfig) -> dict:
     runner: LegalRunner | None = _deps(config).get("legal_runner")
     if not trig:
         return {"triggers": [], "regulatory": [], "legal_texts": {}}
+    if runner is None:      # 질문 LLM 호출 전에 확인한다. 결과를 버릴 호출에 비용을 쓰지 않는다
+        return {"triggers": trig, "regulatory": [], "legal_texts": {},
+                "errors": ["regulatory: 법령 서브그래프가 연결되지 않아 규제 검토를 건너뛰었다"]}
     questions = []
     name = state["corp"].corp_name
     if "financial" in trig:
@@ -163,9 +166,6 @@ async def regulatory_check(state: CompanyState, config: RunnableConfig) -> dict:
             "이 공시와 관련해 전자금융거래법령에서 확인할 질문 1개를 한 문장으로 써라."}],
             effort="medium", task="company.reg_question")
         questions.append(q.question)
-    if runner is None:
-        return {"triggers": trig, "regulatory": [], "legal_texts": {},
-                "errors": ["regulatory: 법령 서브그래프가 연결되지 않아 규제 검토를 건너뛰었다"]}
     findings, texts = [], {}
     for q in questions[:3]:
         _progress("company.regulatory", q)
