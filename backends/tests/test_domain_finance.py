@@ -49,10 +49,10 @@ def test_financial_group_detection():
 
 
 def test_display_and_render():
-    opm = Metric(id="op_margin", label="영업이익률", period="2025FY", value=D(10), unit="%", formula="op/rev")
+    opm = Metric(id="op_margin", label="영업이익률", period="2025FY", value=D(10), unit="%", formula="op/rev", text="10.0%")
     rev = Metric(id="revenue", label="매출액", period="2025FY", value=D(1_234_567_890_000), unit="KRW", formula="rev")
     assert display(opm) == "10.0%"
-    assert display(rev) == "12,346억 원"
+    assert display(rev) == "—"                            # 표시 문자열이 없는 사실은 대시
     by_slot = {x.slot_id: x for x in (opm, rev)}
     assert render("영업이익률은 {{op_margin.2025FY}}다", by_slot) == "영업이익률은 10.0%다"
     assert missing_slots("{{foo.2025FY}}", by_slot) == ["foo.2025FY"]

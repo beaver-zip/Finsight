@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import html
 import re
-from decimal import ROUND_HALF_UP, Decimal
 
 from app.domain.models import Metric
 
@@ -11,7 +10,6 @@ SLOT = re.compile(r"\{\{\s*([A-Za-z0-9_]+\.[A-Za-z0-9]+)\s*\}\}")
 NEWS_REF = re.compile(r"\[(n\d+)\]")
 NUMBER = re.compile(r"\d[\d,.]*")
 _DATE_SUFFIX = ("년", "월", "일", "분기", "반기")
-GROWTH_IDS = {"revenue_growth", "op_income_growth", "net_income_growth"}
 _ARTICLE = re.compile(r"제\s*(\d+)\s*(?:조(?:의\s*(\d+))?|항|호)")
 _ANNEX = re.compile(r"별표\s*(\d+)(?:\s*의\s*(\d+))?")
 # 기간 표기: 3Q26, 3Q26P, 2026H1, H126, FY25, 1~3분기, 3~5년
@@ -19,26 +17,9 @@ _PERIOD = re.compile(r"(?<![0-9A-Za-z])(?:[1-4]Q\d{2}P?|\d{4}H[12]|H[12]\d{2}|FY
 _RANGE = re.compile(r"\d+\s*[~∼～\-–]\s*\d+\s*(?=년|개월|월|일|분기|주|거래일)")
 
 
-def _q(v: Decimal, places: str) -> Decimal:
-    return v.quantize(Decimal(places), rounding=ROUND_HALF_UP)
-
-
 def display(m: Metric) -> str:
-    """표시 단계 반올림: 비율(%) 소수 첫째 자리, 배수 소수 둘째 자리, 금액 억 원 단위 정수."""
-    if m.text is not None:
-        return m.text
-    if m.value is None:
-        return m.note or "—"
-    if m.unit == "%" and m.id in GROWTH_IDS:
-        v = _q(m.value, '0.1')
-        s = f"{abs(v)}% {'증가' if v >= 0 else '감소'}"
-    elif m.unit == "%":
-        s = f"{_q(m.value, '0.1')}%"
-    elif m.unit == "x":
-        s = f"{_q(m.value, '0.01')}배"
-    else:
-        s = f"{int(_q(m.value / Decimal(100_000_000), '1')):,}억 원"
-    return f"{s}({m.note})" if m.note else s
+    """표시 문자열은 분석 단계(domain/fmt.py 규칙)에서 정해 text에 담는다."""
+    return m.text if m.text is not None else "—"
 
 
 def slots_in(text: str) -> list[str]:
@@ -123,9 +104,7 @@ def substitute(text: str, by_slot: dict[str, Metric], fmt) -> str:
 
 
 def tooltip(m: Metric) -> str:
-    parts = [f"{r.account_nm}({r.column}) rcpNo {r.rcept_no}" for r in m.inputs]
-    base = f"{m.formula} · " + " / ".join(parts) if parts else m.formula
-    return f"{base} · {m.source}" if m.source else base
+    return f"{m.formula} · {m.source}" if m.source else m.formula
 
 
 def render(text: str, by_slot: dict[str, Metric], *, as_html: bool = False) -> str:
