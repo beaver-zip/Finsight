@@ -13,9 +13,18 @@ from app.settings import get_settings, require
 BATCH = 64
 _sem = asyncio.Semaphore(2)
 RETRY_DELAYS = (2, 5, 10, 20, 0)
+_http: httpx.AsyncClient | None = None
 
 
-async def embed(texts: list[str], *, http: httpx.AsyncClient | None = None) -> np.ndarray:
+def _client() -> httpx.AsyncClient:
+    """프로세스당 하나(llm.client()와 같은 방식): 질의마다 새 TCP·TLS 연결을 맺지 않는다."""
+    global _http
+    if _http is None:
+        _http = httpx.AsyncClient(timeout=30)
+    return _http
+
+
+async def embed(texts: list[str]) -> np.ndarray:
     """정규화된 임베딩 행렬(len(texts) × 1024)."""
     if not texts:
         return np.zeros((0, 1024), dtype=np.float32)
@@ -24,19 +33,14 @@ async def embed(texts: list[str], *, http: httpx.AsyncClient | None = None) -> n
     keys = [make_key(s.embedding_model, t) for t in texts]
     out: list[list[float] | None] = [await cache.get("emb", k) for k in keys]
     todo = [i for i, v in enumerate(out) if v is None]
-    if todo:
-        own = http is None
-        http = http or httpx.AsyncClient(timeout=30)
-        try:
-            for start in range(0, len(todo), BATCH):
-                idx = todo[start:start + BATCH]
-                vecs = await _call(http, [texts[i] for i in idx])
-                for i, v in zip(idx, vecs):
-                    out[i] = v
-                    await cache.set("emb", keys[i], v)
-        finally:
-            if own:
-                await http.aclose()
+
+    async def one(idx: list[int]) -> None:
+        for i, v in zip(idx, await _call(_client(), [texts[i] for i in idx])):
+            out[i] = v
+            await cache.set("emb", keys[i], v)
+
+    # 배치를 함께 보내고 _sem(2)이 동시성을 막는다. 성공한 배치는 다른 배치가 실패해도 캐시에 남는다
+    await asyncio.gather(*(one(todo[start:start + BATCH]) for start in range(0, len(todo), BATCH)))
     m = np.asarray(out, dtype=np.float32)
     norms = np.linalg.norm(m, axis=1, keepdims=True)
     return m / np.clip(norms, 1e-12, None)
@@ -44,9 +48,9 @@ async def embed(texts: list[str], *, http: httpx.AsyncClient | None = None) -> n
 
 async def _call(http: httpx.AsyncClient, batch: list[str]) -> list[list[float]]:
     s = get_settings()
-    await budget.check_budget()
     for delay in RETRY_DELAYS:                # 429·5xx는 기다렸다가 다시 부른다
         async with _sem:
+            await budget.check_budget()       # 세마포어 안에서: 함께 보낸 배치가 예산 검사를 한꺼번에 지나지 않게
             r = await http.post(f"{s.openrouter_base_url}/embeddings",
                                 headers={"Authorization": f"Bearer {require(s.openrouter_key, 'OPENROUTER_KEY')}"},
                                 json={"model": s.embedding_model, "input": batch})

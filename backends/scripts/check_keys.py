@@ -53,7 +53,7 @@ async def check_openrouter(http: httpx.AsyncClient) -> None:
         d = r.json().get("data", {}) if r.status_code == 200 else {}
         from app.core.embeddings import embed
 
-        v = await embed([f"키 확인 {time.time()}"], http=http)
+        v = await embed([f"키 확인 {time.time()}"])
         add("OpenRouter", r.status_code == 200 and v.shape[1] == 1024,
             f"HTTP {r.status_code}, 키 누적 사용 {d.get('usage')}달러, 임베딩 {v.shape[1]}차원")
     except Exception as e:  # noqa: BLE001
