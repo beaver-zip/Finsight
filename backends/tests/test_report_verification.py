@@ -120,13 +120,14 @@ async def test_verifier_outage_after_revision_discards_rewritten_draft(scenario)
     assert "계산된 수치" in out["html"] and "검증을 완료하지 못해" in out["html"]
 
 
+@pytest.mark.parametrize("legacy", ["v2.3", "v2.4"])
 @pytest.mark.asyncio
-async def test_legacy_cached_report_is_not_served(scenario, monkeypatch, temp_cache):
+async def test_legacy_cached_report_is_not_served(scenario, monkeypatch, temp_cache, legacy):
     s = scenario
     monkeypatch.setattr(report, "_cache_key", s.cache_key)
     monkeypatch.setattr(report.dart_corp, "get_profile", AsyncMock(return_value=s.profile))
     monkeypatch.setattr(report.dart_filings, "latest_periodic", AsyncMock(return_value=None))
-    await temp_cache.set("report", "v2.3:test:none:-", {"html": "unverified legacy report", "json": {}})
+    await temp_cache.set("report", f"{legacy}:test:none:-", {"html": "unverified legacy report", "json": {}})
     result = await report.build_report(s.st, "test")
     assert "unverified legacy report" not in result["html"]
     assert s.verify.await_count == 1

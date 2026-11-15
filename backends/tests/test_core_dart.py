@@ -35,9 +35,9 @@ async def test_share_counts_empty_answer_expires(temp_cache):
     dart = FakeDart(DartNoData("013", "없음"), {"status": "000", "list": rows})
     assert await shares.share_counts(dart, "c", 2026, "11014") is None
     key = "stockTotqySttus:c:2026:11014"
-    row = temp_cache._run("SELECT expires_at FROM kv WHERE namespace='dart.sh' AND key=?", (key,))
+    row = temp_cache._run("SELECT expires_at FROM kv WHERE namespace='dart.sh.v2' AND key=?", (key,))
     assert row and row[0][0] is not None and row[0][0] - time.time() <= 300
-    await temp_cache.set("dart.sh", key, [], ttl_s=-1)                    # 5분이 지난 것처럼
+    await temp_cache.set("dart.sh.v2", key, [], ttl_s=-1)                    # 5분이 지난 것처럼
     got = await shares.share_counts(dart, "c", 2026, "11014")
     assert got is not None and got.common_out == 900 and dart.calls == 2
     assert await shares.share_counts(dart, "c", 2026, "11014") is not None and dart.calls == 2   # 정상 값은 계속 쓴다
@@ -181,3 +181,12 @@ async def test_filing_list_falls_back_to_previous_day_during_outage(monkeypatch,
     now += 86_400
     again = await filings.latest_periodic(dart, profile, today=date(2026, 11, 16))
     assert again == first and again.rcept_no == "20261114000001" and dart.calls == 2
+
+
+async def test_share_counts_ignores_legacy_permanent_empty_entry(temp_cache):
+    # 예전 코드가 만료 없이 저장한 빈 응답([])은 읽지 않고 OpenDART를 다시 부른다
+    await temp_cache.set("dart.sh", "stockTotqySttus:c:2026:11014", [])
+    rows = [{"se": "보통주", "istc_totqy": "1,000", "tesstk_co": "100", "distb_stock_co": "900", "rcept_no": "r1"}]
+    dart = FakeDart({"status": "000", "list": rows})
+    got = await shares.share_counts(dart, "c", 2026, "11014")
+    assert got is not None and got.common_out == 900 and dart.calls == 1

@@ -26,7 +26,7 @@ log = logging.getLogger(__name__)
 router = APIRouter()
 WEEK = 7 * 86_400
 HOUR = 3_600                # 외부 수집이 일부 실패한 리포트: 장애가 풀리면 다시 만든다
-VERSION = "v2.4"            # v2.4: 검증을 통과한 완성본만 캐시
+VERSION = "v2.5"            # v2.5: 이전 리포트는 재무 수치가 틀리고 링크가 새 탭으로 열리지 않는다
 # 장애로 빠졌을 수 있는 자료: collect 하위 갈래, guarded 노드 예외("news: ConnectTimeout: ...").
 # 법령 서브그래프 미연결 같은 설정 문제는 예외 이름이 없어 걸리지 않는다
 _TRANSIENT = re.compile(r"collect\.|(news|disclosures|regulatory): [A-Za-z_]\w*: ")
