@@ -74,12 +74,6 @@ class SQLiteCache:
     async def delete(self, namespace: str, key: str) -> None:
         await asyncio.to_thread(self._run, "DELETE FROM kv WHERE namespace=? AND key=?", (namespace, key))
 
-    async def purge_expired(self) -> int:
-        rows = await asyncio.to_thread(
-            self._run, "DELETE FROM kv WHERE expires_at IS NOT NULL AND expires_at < ? RETURNING 1",
-            (time.time(),))
-        return len(rows)
-
     async def record_cost(self, entry: dict) -> None:
         await asyncio.to_thread(
             self._run,

@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import time
 
-from app.core.dart import shares
-from app.core.dart.client import DartNoData
+from app.core.dart import corp, shares
+from app.core.dart.client import DartError, DartNoData
 
 
 class FakeDart:
@@ -21,6 +21,8 @@ class FakeDart:
             raise a
         return a
 
+    binary = json
+
 
 async def test_share_counts_empty_answer_expires(temp_cache):
     # 보고서 제출 직후 주식 총수가 아직 013이면 짧게만 기억하고, 데이터가 들어오면 다시 읽는다
@@ -34,3 +36,13 @@ async def test_share_counts_empty_answer_expires(temp_cache):
     got = await shares.share_counts(dart, "c", 2026, "11014")
     assert got is not None and got.common_out == 900 and dart.calls == 2
     assert await shares.share_counts(dart, "c", 2026, "11014") is not None and dart.calls == 2   # 정상 값은 계속 쓴다
+
+
+async def test_corp_list_uses_expired_list_when_dart_is_down(temp_cache):
+    # 하루가 지나 만료된 기업 목록이라도 OpenDART 점검 중에는 그것으로 검색한다
+    rows = [{"corp_code": "00126380", "corp_name": "삼성전자", "corp_eng_name": "", "modify_date": "",
+             "stock_code": "005930"}]
+    await temp_cache.set("dart.corplist", "all", rows, ttl_s=-1)
+    dart = FakeDart(DartError("800", "시스템 점검"), DartError("800", "시스템 점검"))
+    assert await corp.corp_list(dart) == rows
+    assert [r["corp_code"] for r in await corp.search_keyword(dart, "삼성")] == ["00126380"]

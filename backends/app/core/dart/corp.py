@@ -5,7 +5,6 @@ import io
 import zipfile
 from xml.etree import ElementTree as ET
 
-from app.core.cache import get_cache
 from app.core.dart.client import DartClient, cached
 from app.domain.models import CorpProfile
 
@@ -13,22 +12,20 @@ DAY = 86_400
 
 
 async def corp_list(dart: DartClient) -> list[dict]:
-    """[{corp_code, corp_name, stock_code}] 전체 목록."""
-    cache = get_cache()
-    hit = await cache.get("dart.corplist", "all")
-    if hit is not None:
-        return hit
-    raw = await dart.binary("corpCode.xml")
-    with zipfile.ZipFile(io.BytesIO(raw)) as z:
-        xml = z.read(z.namelist()[0])
-    rows = []
-    for el in ET.fromstring(xml).iter("list"):
-        stock = (el.findtext("stock_code") or "").strip()
-        rows.append({"corp_code": el.findtext("corp_code"), "corp_name": (el.findtext("corp_name") or "").strip(),
-                     "corp_eng_name": (el.findtext("corp_eng_name") or "").strip(),
-                     "modify_date": (el.findtext("modify_date") or "").strip(), "stock_code": stock or None})
-    await cache.set("dart.corplist", "all", rows, ttl_s=DAY)
-    return rows
+    """[{corp_code, corp_name, stock_code}] 전체 목록. OpenDART가 실패하면 만료된 목록이라도 쓴다."""
+    async def fetch() -> list[dict]:
+        raw = await dart.binary("corpCode.xml")
+        with zipfile.ZipFile(io.BytesIO(raw)) as z:
+            xml = z.read(z.namelist()[0])
+        rows = []
+        for el in ET.fromstring(xml).iter("list"):
+            stock = (el.findtext("stock_code") or "").strip()
+            rows.append({"corp_code": el.findtext("corp_code"), "corp_name": (el.findtext("corp_name") or "").strip(),
+                         "corp_eng_name": (el.findtext("corp_eng_name") or "").strip(),
+                         "modify_date": (el.findtext("modify_date") or "").strip(), "stock_code": stock or None})
+        return rows
+
+    return await cached("dart.corplist", "all", DAY, fetch)
 
 
 def _norm(s: str) -> str:
