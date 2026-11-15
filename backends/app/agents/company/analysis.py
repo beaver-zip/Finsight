@@ -1035,7 +1035,7 @@ def _events(c: dict) -> None:
     if len(out) < 4:
         return
     done = [e for e in out if e["ex3"] is not None]
-    hist = [e for e in out[:-1]] if out[-1]["ex3"] is None else out
+    hist = out[:-1]                       # 최근 발표(ev_ex0)를 과거 평균과 비교하므로 늘 뺀다
     F.add("ev_n", "all", f"{out[0]['date'][:4]}년 이후 잠정실적 발표 횟수(최근 제외)", f"{len(hist)}번", len(hist), "n")
     F.add("ev_abs_mean", "all", f"발표일 {inp.index_name} 대비 초과수익률 절댓값 평균", f"{st.mean(abs(e['ex0']) for e in hist):.1f}%p",
           st.mean(abs(e["ex0"]) for e in hist), "%p")

@@ -157,6 +157,9 @@ def test_events_excess_return_and_rel():
     e = ev[0]
     assert e["ex0"] == pytest.approx(e["day_stock"] - e["day_index"], abs=1e-9)
     assert data.charts["rel"]["rows"][0][1] == pytest.approx(100.0)
+    # 마지막 발표의 3거래일 값이 있어도 '최근 제외' 횟수·평균에는 넣지 않는다
+    assert ev[-1]["ex3"] is not None and data.facts["ev_n.all"].text == "9번"
+    assert data.facts["ev_abs_mean.all"].value == pytest.approx(D(str(round(sum(abs(e["ex0"]) for e in ev[:-1]) / 9, 6))))
 
 
 def test_prelim_path_uses_disclosed_growth_and_consensus():
