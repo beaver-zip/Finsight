@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 
 import numpy as np
+import pytest
 
 from app.domain.dates import KST
 from app.domain.news_rank import Candidate, cluster, coverage, mmr_select, representatives, score
@@ -70,8 +71,13 @@ async def test_embed_empty_and_pipeline_without_hits(monkeypatch):
     assert res.items == [] and res.note == "최근 기사를 찾지 못했다"
 
 
-async def test_pipeline_researches_missing_aspects_and_fills_failed_summaries(monkeypatch):
-    # 첫 검색이 2개 측면만 덮으면 1년 범위로 재검색하고, 요약에 실패한 기사는 다음 순위 기사로 채운다
+@pytest.mark.parametrize("api_error", [False, True])
+async def test_pipeline_researches_missing_aspects_and_fills_failed_summaries(monkeypatch, api_error):
+    # 첫 검색이 2개 측면만 덮으면 1년 범위로 재검색하고, 요약에 실패한 기사는 다음 순위 기사로 채운다.
+    # API 오류(재시도 소진 뒤 타임아웃 등)도 그 기사만 빼야 한다: 예외가 올라가면 성공한 요약까지 버려진다
+    import anthropic
+    import httpx
+
     from app.agents.news import pipeline as P
     from app.core.search.news import SearchHit
     from app.domain.models import ArticleAnalysis, CorpProfile, QueryPlan
@@ -104,6 +110,8 @@ async def test_pipeline_researches_missing_aspects_and_fills_failed_summaries(mo
     async def structured(model, messages, **k):
         u = messages[0]["content"].split("제목: 삼성전자 ", 1)[1].split("\n", 1)[0]
         summarized.append(u)
+        if u == "u4" and api_error:
+            raise anthropic.APITimeoutError(request=httpx.Request("POST", "https://api.anthropic.com"))
         if u in fail:
             raise P.llm.StructuredOutputError("evidence 불일치")
         return ArticleAnalysis(summary=["a.", "b.", "c."], impact_direction="neutral", impact_horizon="short",

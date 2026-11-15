@@ -8,6 +8,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 
+import anthropic
 import httpx
 import numpy as np
 from pydantic import BaseModel
@@ -166,7 +167,7 @@ async def summarize(corp_name: str, c: Candidate) -> ArticleAnalysis | None:
     try:
         return await llm.structured(ArticleAnalysis, [{"role": "user", "content": prompt}], system=SUMMARY_SYSTEM,
                                     effort="medium", task="news.summarize", validate=check)
-    except llm.StructuredOutputError as e:
+    except (llm.StructuredOutputError, anthropic.APIError) as e:     # 그 기사만 빼고 다음 순위로 채운다
         log.info("기사 분석 실패 %s: %s", c.url, e)
         return None
 
