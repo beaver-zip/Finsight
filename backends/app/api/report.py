@@ -65,7 +65,8 @@ def _config(st: AppState) -> dict:
 
 def _cacheable(out: dict, usage: budget.RequestUsage) -> bool:
     ver = out.get("verification")
-    return out.get("draft") is not None and ver is not None and ver.passed and not usage.exceeded
+    return (out.get("draft") is not None and ver is not None and not usage.exceeded
+            and all(i.type == "style" for i in ver.issues))   # 문체 지적만 남은 초안은 완성본이다
 
 
 async def build_report(st: AppState, corp_code: str) -> dict:

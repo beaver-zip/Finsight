@@ -168,3 +168,16 @@ async def test_nested_report_usage_is_included_in_parent_and_cached_cost_stays_l
     assert parent.cost_usd == pytest.approx(0.6)
     budget.add_request_usage("anthropic", 5, 0.1)
     assert parent.tokens == 35
+
+
+def test_style_only_issues_keep_text_without_warning_and_are_cached(scenario):
+    scenario.verify.return_value = VerificationResult(passed=False, issues=[
+        VerificationIssue(claim_id="summary.1", type="style", detail="banned phrase")])
+    app = FastAPI()
+    app.include_router(report.router, prefix="/report")
+    app.dependency_overrides[get_state] = lambda: scenario.st
+    with TestClient(app) as client:
+        assert client.get("/report/test/json").json()["errors"] == []
+        html = client.get("/report/test").text
+    assert "제거할 문장" in html and "남길 문장" in html and "검증을 통과하지 못한" not in html
+    assert scenario.verify.await_count == 1 + nodes.MAX_REVISIONS

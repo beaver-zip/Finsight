@@ -245,7 +245,7 @@ async def assemble(state: CompanyState, config: RunnableConfig) -> dict:
     if draft is not None:
         if ver is None:
             warning = "본문 검증을 완료하지 못해 생성 문장을 표시하지 않습니다. 계산된 표·차트만 제공합니다."
-        elif not ver.passed:
+        elif any(i.type != "style" for i in ver.issues):   # 문체 지적만 남으면 finalize가 문장을 남긴다
             warning = "본문이 검증을 통과하지 못한 부분이 있습니다. 근거 문제가 남은 문장은 제외했습니다."
         if warning:
             errs.append(f"verify: {warning}")
