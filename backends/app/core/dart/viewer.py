@@ -91,7 +91,9 @@ async def _paced_get(http: httpx.AsyncClient, url: str) -> httpx.Response:
         if wait > 0:
             await asyncio.sleep(wait)
         try:
-            return await http.get(url, headers={"User-Agent": "Mozilla/5.0 Finsight"}, timeout=30)
+            # 리다이렉트는 점검·차단 페이지다. 따라가면 그 페이지를 원문으로 캐시한다
+            return await http.get(url, headers={"User-Agent": "Mozilla/5.0 Finsight"}, timeout=30,
+                                  follow_redirects=False)
         finally:
             _last = time.monotonic()
 

@@ -45,8 +45,9 @@ class DartClient:
                 await asyncio.sleep(delay)
             try:
                 async with self._sem:
+                    # 공유 클라이언트가 리다이렉트를 따라가면 점검 HTML을 정상 응답으로 읽는다
                     r = await self.http.get(f"{BASE}/{path}", params={"crtfc_key": self._key, **params},
-                                            timeout=10)
+                                            timeout=10, follow_redirects=False)
                 r.raise_for_status()
                 status = _status_of(path, r)
                 if status == "800":

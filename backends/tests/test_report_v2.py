@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from decimal import Decimal as D
 
+import httpx
 import pytest
 
 from app.agents.company import writer
@@ -321,3 +322,40 @@ async def test_dart_cached_uses_stale_value_when_dart_fails(temp_cache):
     assert await cached("ns", "k", 60, boom) == [2]          # 유효한 캐시는 원천을 부르지 않는다
     with pytest.raises(DartError):
         await cached("ns", "missing", 60, boom)
+
+
+def _redirect_to_error_page(req):
+    if req.url.path.endswith("error.html"):
+        return httpx.Response(200, text="<html>" + "점검 중" * 100 + "</html>")
+    return httpx.Response(302, headers={"location": "https://opendart.fss.or.kr/error.html"})
+
+
+async def test_dart_redirect_is_dart_error_even_on_redirect_following_client(monkeypatch):
+    # main.py의 공유 클라이언트는 follow_redirects=True다. 302를 따라가 점검 HTML을 JSON으로 읽으면 안 된다.
+    from app.core.dart import client
+    from app.core.dart.client import DartClient, DartError
+
+    monkeypatch.setattr(client, "require", lambda value, name: "test")
+    async with httpx.AsyncClient(transport=httpx.MockTransport(_redirect_to_error_page), follow_redirects=True) as http:
+        dart = DartClient(http)
+        with pytest.raises(DartError) as e:
+            await dart.json("list", corp_code="00126380")
+        assert e.value.status == "302"
+        with pytest.raises(DartError):
+            await dart.binary("corpCode.xml")
+
+
+async def test_dart_viewer_redirect_is_not_cached(monkeypatch, temp_cache):
+    from app.core.dart import viewer
+
+    monkeypatch.setattr(viewer, "GAP", 0)
+    monkeypatch.setattr(viewer.asyncio, "sleep", _no_sleep)
+    url = f"{viewer.BASE}/dsaf001/main.do?rcpNo=1"
+    async with httpx.AsyncClient(transport=httpx.MockTransport(_redirect_to_error_page), follow_redirects=True) as http:
+        with pytest.raises(RuntimeError):
+            await viewer.fetch(http, url)
+    assert await temp_cache.get("dart.view", url) is None
+
+
+async def _no_sleep(_):
+    return None
