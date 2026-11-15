@@ -1,6 +1,7 @@
 """업로드 내규: 파일 이름·형식 검사, 조문 분할, 엔드포인트 왕복(가짜 벡터 저장소), 관리 토큰."""
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace as NS
 
 import fitz
@@ -467,3 +468,55 @@ def test_legacy_article_keys_are_adapted_without_rewriting_store(store):
     assert uploads.get_article(canonical).paragraphs[0].text == "Legacy policy."
     assert uploads.get_article(canonical).paragraphs[0].key == canonical + ":p0"
     assert uploads.STORE.read_text() == old
+
+
+class GatedVectors(FakeVectors):
+    """add가 gate를 기다리게 해 적재 도중에 다른 요청이 끼어드는 상황을 만든다."""
+
+    def __init__(self):
+        super().__init__()
+        self.entered, self.gate = asyncio.Event(), asyncio.Event()
+        self.gate.set()
+
+    async def add(self, chunks):
+        self.entered.set()
+        await self.gate.wait()
+        return await super().add(chunks)
+
+
+async def _register_replacement_paused(name: str, old: bytes, new: bytes):
+    """old를 등록하고 new를 올린 뒤, new 적재가 벡터 추가에서 멈춘 상태를 돌려준다."""
+    vec = GatedVectors()
+    st = NS(law_tools=NS(vectors=vec))
+    uploads.save_file(name, old)
+    await documents.register(documents.FileNames(file_name=[name]), st)
+    uploads.save_file(name, new)
+    vec.entered.clear()
+    vec.gate.clear()
+    task =asyncio.create_task(documents.register(documents.FileNames(file_name=[name]), st))
+    await vec.entered.wait()
+    return vec, st, task
+
+
+@pytest.mark.asyncio
+async def test_delete_during_replacement_register_leaves_nothing(store):
+    vec, st, reg = await _register_replacement_paused("삭제.pdf", _pdf("Old."), _pdf("New."))
+    delete = asyncio.create_task(documents.delete_file(documents.FileName(file_name="삭제.pdf"), st))
+    await asyncio.sleep(0)
+    vec.gate.set()
+    result, deleted = await reg, await delete
+    assert result["registered"] and not result["failed"] and deleted == {"deleted": "삭제.pdf"}
+    assert uploads.all_docs() == {} and vec.chunks == [] and list((store / "files").iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_concurrent_registers_of_replacement_keep_one_generation(store):
+    vec, st, first = await _register_replacement_paused("동시.pdf", _pdf("Old."), _pdf("New."))
+    second = asyncio.create_task(documents.register(documents.FileNames(file_name=["동시.pdf"]), st))
+    await asyncio.sleep(0)
+    vec.gate.set()
+    for result in (await first, await second):
+        assert result["registered"] and not result["failed"]
+    active = uploads.all_docs()["동시.pdf"]["vector_name"]
+    assert [(c.law_name, c.text) for c in vec.chunks] == [(active, "New.")]
+    assert sorted(p.name for p in (store / "files").iterdir()) == ["동시.pdf"]
