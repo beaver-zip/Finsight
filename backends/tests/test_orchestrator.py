@@ -90,6 +90,42 @@ async def test_company_ambiguous_interrupts_then_resumes(monkeypatch, patched):
     assert seen == ["00126380"] and out["answer"].markdown == "삼성전자 실적 요약입니다."
 
 
+async def test_router_clarification_synthesizes_rewritten_question(monkeypatch, patched):
+    # 되묻기 답("카카오뱅크")이 마지막 사람 메시지가 되어도 합성은 라우터가 풀어 쓴 질문을 받는다
+    async def r(msgs, mode="auto"):
+        if len(msgs) == 1:
+            return Route(intent="company", company=None, clarification="어느 회사인가요?",
+                         sub_tasks=[SubTask(agent="company", instruction="그 회사 영업이익 추이")])
+        return Route(intent="company", company="카카오뱅크", clarification=None,
+                     sub_tasks=[SubTask(agent="company", instruction="카카오뱅크 영업이익 추이")])
+    monkeypatch.setattr(G, "route", r)
+    corp = CorpProfile(corp_code="01133217", corp_name="카카오뱅크", stock_code="323410")
+
+    async def cands(dart, name):
+        return [{"corp_code": corp.corp_code, "corp_name": corp.corp_name, "stock_code": corp.stock_code}]
+
+    async def profile(dart, code):
+        return corp
+    monkeypatch.setattr(G, "listed_candidates", cands)
+    monkeypatch.setattr(G.dart_corp, "get_profile", profile)
+
+    async def company(*a, **kw):
+        return SubResult(agent="company", content="사실표 …"), EvidencePart()
+    monkeypatch.setattr(G, "run_company", company)
+    asked = []
+
+    async def synth(q, results, issues=None, prev=None):
+        asked.append(q)
+        return [Claim(id="c1", text="영업이익은 늘었습니다.")]
+    monkeypatch.setattr(G, "synthesize", synth)
+    g = G.build_orchestrator(InMemorySaver())
+    cfg = _cfg("t-clar", report_builder=None)
+    out = await g.ainvoke({"messages": [HumanMessage("그 회사 영업이익 추이는?")], "mode": "auto"}, config=cfg)
+    assert out["__interrupt__"][0].value["question"] == "어느 회사인가요?"
+    out = await g.ainvoke(Command(resume="카카오뱅크"), config=cfg)
+    assert asked == ["카카오뱅크 영업이익 추이"] and out["answer"].markdown == "영업이익은 늘었습니다."
+
+
 @pytest.mark.parametrize("news_fails", [False, True])
 async def test_company_and_news_do_not_share_article_ids(monkeypatch, patched, news_fails):
     # 리포트(캐시) 기사와 새 뉴스 기사가 둘 다 n1이면 출처·검증 본문이 뒤의 기사로 덮인다

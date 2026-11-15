@@ -75,10 +75,8 @@ def _progress(stage: str, detail: str) -> None:
 
 
 def _question(state: OrchestratorState) -> str:
-    for m in reversed(state.get("messages", [])):
-        if m.type == "human":
-            return m.content if isinstance(m.content, str) else str(m.content)
-    return ""
+    """라우터가 지시어를 풀어 쓴 질문. 마지막 사람 메시지는 되묻기 답("카카오뱅크")일 수 있다."""
+    return "\n".join(t.instruction for t in state["route"].sub_tasks)
 
 
 # ---------------- 노드
