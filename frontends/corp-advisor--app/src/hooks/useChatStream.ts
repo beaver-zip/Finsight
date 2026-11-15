@@ -73,5 +73,5 @@ export function useChatStream() {
     [threadId],
   );
 
-  return { send, isLoading, resetThread, threadId };
+  return { send, isLoading, resetThread };
 }

@@ -148,7 +148,6 @@ function Chatbot() {
 
   const form = (
     <ChatForm
-      inputContainerClass="w-full"
       textareaRef={textareaRef}
       inputValue={inputValue}
       onChange={(e) => setInputValue(e.target.value)}
@@ -157,7 +156,6 @@ function Chatbot() {
       handleOpenModal={openModal}
       collectionFiles={collectionFiles}
       handleFileDelete={() => refetchCollectionFiles()}
-      showKnowledgeBase
       hasMessages={hasMessages}
       isLoading={isLoading}
       queryMode={queryMode}

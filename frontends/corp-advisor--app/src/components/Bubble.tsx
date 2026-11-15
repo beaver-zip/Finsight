@@ -12,7 +12,6 @@ export type Message = {
 
 type BubbleProps = {
   isQuestion: boolean;
-  answerClass?: string;
   msg: Message;
 };
 
@@ -28,7 +27,7 @@ const markdownComponents = {
   ),
 };
 
-export function Bubble({ isQuestion, answerClass, msg }: BubbleProps) {
+export function Bubble({ isQuestion, msg }: BubbleProps) {
   // ---------- 사용자 질문 ----------
   if (isQuestion) {
     return (
@@ -68,12 +67,7 @@ export function Bubble({ isQuestion, answerClass, msg }: BubbleProps) {
         <p className="mb-1.5 text-[12px] font-semibold text-ink-400">
           FinSight
         </p>
-        <div
-          className={
-            answerClass ??
-            "rounded-2xl rounded-tl-md border border-ink-200 bg-white px-5 py-4 shadow-card"
-          }
-        >
+        <div className="rounded-2xl rounded-tl-md border border-ink-200 bg-white px-5 py-4 shadow-card">
           {renderBody()}
         </div>
       </div>

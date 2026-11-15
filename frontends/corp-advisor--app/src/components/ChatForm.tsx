@@ -1,5 +1,4 @@
 import React, { useEffect, useRef, useState } from "react";
-import { FooterText } from "./FooterText";
 import { Paperclip, ArrowUp, Trash2, FileText, Plus } from "lucide-react";
 import { RAGDropdown } from "./RAGDropdown";
 import type { CollectionFile } from "../hooks/useCollectionFiles";
@@ -7,15 +6,12 @@ import { useDeleteFile } from "../hooks/useDeleteFile";
 import type { QueryMode } from "../hooks/useChatStream";
 
 type ChatFormProps = {
-  inputContainerClass: string;
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
   inputValue: string;
   onChange: React.ChangeEventHandler<HTMLTextAreaElement>;
   onKeyDown: React.KeyboardEventHandler<HTMLTextAreaElement>;
   onClick: React.MouseEventHandler<HTMLButtonElement>;
   handleOpenModal: () => void;
-  loadingPlaceholder?: string;
-  defaultPlaceholder?: string;
   afterSubmitPlaceholder?: string;
   collectionFiles: CollectionFile[];
   handleFileDelete: (fileName: string) => void;
@@ -23,20 +19,15 @@ type ChatFormProps = {
   isLoading: boolean;
   queryMode: QueryMode;
   setQueryMode: (mode: QueryMode) => void;
-  /** 업로드 API가 생기기 전까지는 지식베이스(업로드 문서) 버튼을 숨긴다 */
-  showKnowledgeBase?: boolean;
 };
 
 export function ChatForm({
-  inputContainerClass,
   textareaRef,
   inputValue,
   onChange,
   onKeyDown,
   onClick,
   handleOpenModal,
-  loadingPlaceholder = "답변을 생성하고 있습니다…",
-  defaultPlaceholder = "전자금융 법령이나 상장사 실적·뉴스를 질문해 주세요.",
   afterSubmitPlaceholder = "추가 질문을 입력하세요.",
   collectionFiles,
   handleFileDelete,
@@ -44,7 +35,6 @@ export function ChatForm({
   isLoading,
   queryMode,
   setQueryMode,
-  showKnowledgeBase = false,
 }: ChatFormProps) {
   const [showFilePanel, setShowFilePanel] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -64,15 +54,15 @@ export function ChatForm({
 
   const placeholder =
     isLoading && inputValue === ""
-      ? loadingPlaceholder
+      ? "답변을 생성하고 있습니다…"
       : hasMessages
       ? afterSubmitPlaceholder
-      : defaultPlaceholder;
+      : "전자금융 법령이나 상장사 실적·뉴스를 질문해 주세요.";
 
   const canSend = !isLoading && inputValue.trim().length > 0;
 
   return (
-    <div className={inputContainerClass}>
+    <div className="w-full">
       {/* 모드 선택 */}
       <div className="mb-2.5">
         <RAGDropdown
@@ -97,7 +87,7 @@ export function ChatForm({
 
         <div className="flex items-center justify-between gap-2 px-1 pb-0.5 pt-1">
           {/* 지식베이스 파일 */}
-          <div className={showKnowledgeBase ? "relative" : "invisible"} ref={panelRef}>
+          <div className="relative" ref={panelRef}>
             <button
               type="button"
               onClick={() => setShowFilePanel((prev) => !prev)}
@@ -192,9 +182,9 @@ export function ChatForm({
         </div>
       </div>
 
-      <div className="mt-2">
-        <FooterText footerText="FinSight의 답변은 부정확할 수 있습니다. 중요한 내용은 원문 법령과 공시를 다시 확인해 주세요." />
-      </div>
+      <p className="mt-2 text-center text-[11.5px] leading-relaxed text-ink-400">
+        FinSight의 답변은 부정확할 수 있습니다. 중요한 내용은 원문 법령과 공시를 다시 확인해 주세요.
+      </p>
     </div>
   );
 }

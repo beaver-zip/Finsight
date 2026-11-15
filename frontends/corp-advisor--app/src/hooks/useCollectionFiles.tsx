@@ -35,8 +35,7 @@ export const useCollectionFiles = () => {
       }
 
       const data = await response.json();
-      const fileList = await data.unique_file_name_and_chunk;
-      setFiles(fileList);
+      setFiles(data.unique_file_name_and_chunk);
     } catch (err) {
       // 타입 가드를 통해 err가 Error 인스턴스인지 확인
       if (err instanceof Error) {

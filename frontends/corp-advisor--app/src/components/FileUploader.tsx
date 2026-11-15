@@ -57,7 +57,6 @@ export function FileUploader({
           {uploadedFiles.map((file, index) => (
             <UploadFile
               key={`${file.name}-${index}`}
-              index={index}
               fileName={file.name}
               onDelete={() => handleFileDelete(index)}
             />
