@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace as NS
 
+import pytest
+
 from app.agents.legal.answer import points_from, render_markdown
 from app.agents.legal.graph import LegalConfig, after_judge
 from app.agents.legal.tools import normalize, short_name
@@ -67,3 +69,20 @@ def test_mid_sentence_quote_is_wrapped_not_dropped():
                        NS(type="text", text="고 규정합니다.", citations=None)])
     pts = points_from(resp, [d])
     assert pts[0].text.startswith("제2항은 “총자산") and pts[0].text.endswith("”고 규정합니다.")
+
+
+@pytest.mark.asyncio
+async def test_judge_skips_llm_after_last_retry(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from app.agents.legal import graph
+    from app.domain.models import ArticleHit
+
+    llm = AsyncMock(return_value=graph.Sufficiency(sufficient=False, missing=["x"]))
+    monkeypatch.setattr(graph.llm, "structured", llm)
+    seed = ArticleHit(article=load_corpus().get("전자금융거래법:21-2"), score=0.9)
+    cfg = {"configurable": {"legal_config": LegalConfig(max_loops=2)}}
+    state = {"question": "q", "seeds": [seed], "context": [seed], "q_score": 0.9}
+    assert (await graph.judge({**state, "loops": 1}, cfg))["missing"] == ["x"] and llm.await_count == 1
+    out = await graph.judge({**state, "loops": 2}, cfg)
+    assert llm.await_count == 1 and after_judge({**state, "loops": 2, **out}, cfg) == "answer"

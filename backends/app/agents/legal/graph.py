@@ -135,6 +135,8 @@ async def judge(state: LegalState, config: RunnableConfig) -> dict:
     seeds = state.get("seeds") or []
     if not seeds or state.get("q_score", seeds[0].score) < c.threshold:
         return {"missing": [], "low_score": True}                   # 근거 없음 → 거절
+    if (state.get("loops") or 0) >= c.max_loops:
+        return {"missing": []}                                      # 재검색을 다 썼으면 판단 결과와 상관없이 답한다
     ctx = "\n\n".join(f"[{short_name(h.article.key)}] {doc_text(h.article)[:1200]}" for h in state["context"])
     try:
         s = await llm.structured(Sufficiency, [{"role": "user", "content": SUFF_PROMPT.format(
