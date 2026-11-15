@@ -126,6 +126,44 @@ async def test_router_clarification_synthesizes_rewritten_question(monkeypatch, 
     assert asked == ["카카오뱅크 영업이익 추이"] and out["answer"].markdown == "영업이익은 늘었습니다."
 
 
+async def test_listed_candidates_prefers_listed_by_market_cap(monkeypatch):
+    # 2026-10-12: 이름이 같은 비상장 '삼성'이 있어도 상장사 후보를 시가총액 순으로 보여 준다
+    rows = [{"corp_code": "1", "corp_name": "삼성", "stock_code": None},
+            {"corp_code": "2", "corp_name": "삼성SDI", "stock_code": "006400"},
+            {"corp_code": "3", "corp_name": "삼성전자", "stock_code": "005930"}]
+
+    async def corp_list(dart):
+        return rows
+    monkeypatch.setattr(G.dart_corp, "corp_list", corp_list)
+    monkeypatch.setattr("app.core.peers.load_universe",
+                        lambda: [{"stock_code": "005930", "mcap_approx": 400}, {"stock_code": "006400", "mcap_approx": 30}])
+    names = lambda cs: [c["corp_name"] for c in cs]
+    assert names(await G.listed_candidates(None, "삼성")) == ["삼성전자", "삼성SDI"]
+    assert names(await G.listed_candidates(None, "삼성 전자")) == ["삼성전자"]
+    assert names(await G.listed_candidates(None, "006400")) == ["삼성SDI"]          # 6자리는 종목코드
+    assert await G.listed_candidates(None, "없는회사") == []
+
+
+async def test_unresolved_company_keeps_only_legal_task(monkeypatch, patched):
+    async def r(msgs, mode="auto"):
+        return Route(intent="composite", company="없는회사", clarification=None,
+                     sub_tasks=[SubTask(agent="company", instruction="실적"), SubTask(agent="legal", instruction="CISO")])
+    monkeypatch.setattr(G, "route", r)
+
+    async def cands(dart, name):
+        return []
+    monkeypatch.setattr(G, "listed_candidates", cands)
+    g = G.build_orchestrator(InMemorySaver())
+    cfg = _cfg("t-none")
+    out = await g.ainvoke({"messages": [HumanMessage("없는회사 실적과 CISO 의무")], "mode": "auto"}, config=cfg)
+    for _ in range(G.MAX_ASKS + 1):
+        assert "찾지 못했습니다" in out["__interrupt__"][0].value["question"]
+        out = await g.ainvoke(Command(resume="또 없는회사"), config=cfg)
+    assert "__interrupt__" not in out and "clarify: 대상 기업을 정하지 못했다" in out["errors"]
+    assert [t.agent for t in out["route"].sub_tasks] == ["legal"] and [x.agent for x in out["results"]] == ["legal"]
+    assert "시행령 별표 1" in out["answer"].markdown
+
+
 @pytest.mark.parametrize("news_fails", [False, True])
 async def test_company_and_news_do_not_share_article_ids(monkeypatch, patched, news_fails):
     # 리포트(캐시) 기사와 새 뉴스 기사가 둘 다 n1이면 출처·검증 본문이 뒤의 기사로 덮인다
