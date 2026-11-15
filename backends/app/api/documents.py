@@ -112,9 +112,11 @@ async def register(req: FileNames, st: AppState = Depends(get_state)):
 
 @rag_router.get("/show_files_in_collection", summary="올린 문서 목록")
 async def show_files():
+    # 적재 전이거나 적재에 실패한 파일도 보여 줘야 화면에서 지울 수 있다.
+    docs = {p.name: {} for p in uploads.FILES.glob("*.pdf")} | uploads.all_docs()
     return {"unique_file_name_and_chunk": [{"file_name": k, "chunk_count": v.get("chunk_count", 0),
                                             "articles": len(v.get("articles", []))}
-                                           for k, v in sorted(uploads.all_docs().items())]}
+                                           for k, v in sorted(docs.items())]}
 
 
 @rag_router.post("/delete_objects_from_file_name", summary="올린 문서 삭제")
@@ -124,8 +126,9 @@ async def delete_file(req: FileName, st: AppState = Depends(get_state)):
     except uploads.UploadError as e:
         raise HTTPException(400, str(e)) from e
     d = uploads.all_docs().get(name)
-    if d is None:
+    if d is None and not (uploads.FILES / name).is_file():
         raise HTTPException(404, f"올린 문서가 아닙니다: {req.file_name}")
-    await _vectors(st).delete_doc(d.get("vector_name", d["doc_name"]))
+    if d is not None:
+        await _vectors(st).delete_doc(d.get("vector_name", d["doc_name"]))
     uploads.remove(name)
     return {"deleted": name}

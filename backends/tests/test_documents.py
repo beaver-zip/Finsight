@@ -101,6 +101,20 @@ def test_upload_register_list_delete_roundtrip(store):
     assert vec.chunks == [] and uploads.all_docs() == {} and list((store / "files").iterdir()) == []
 
 
+def test_unregistered_upload_is_listed_and_deletable(store):
+    vec = FakeVectors()
+    app = FastAPI()
+    app.include_router(documents.rag_router, prefix="/rag")
+    app.dependency_overrides[get_state] = lambda: NS(law_tools=NS(vectors=vec))
+    c = TestClient(app)
+    uploads.save_file("비밀.pdf", _pdf("Scanned."))
+    files = c.get("/rag/show_files_in_collection").json()["unique_file_name_and_chunk"]
+    assert files == [{"file_name": "비밀.pdf", "chunk_count": 0, "articles": 0}]
+    assert c.post("/rag/delete_objects_from_file_name", json={"file_name": "비밀.pdf"}).json() == {"deleted": "비밀.pdf"}
+    assert vec.deleted == [] and list((store / "files").iterdir()) == []
+    assert c.post("/rag/delete_objects_from_file_name", json={"file_name": "비밀.pdf"}).status_code == 404
+
+
 def test_admin_token(monkeypatch):
     from pydantic import SecretStr
 
