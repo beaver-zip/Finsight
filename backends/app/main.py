@@ -1,6 +1,7 @@
 """Finsight v2 API. 공유 클라이언트와 컴파일된 그래프는 lifespan에서 한 번 만든다."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -14,6 +15,7 @@ from app.agents.legal.graph import build_legal_graph, make_runner
 from app.agents.legal.tools import LawTools
 from app.agents.orchestrator.graph import build_orchestrator, serializer
 from app.api import admin, chat, documents, financial, report
+from app.core import reranker
 from app.core.cache import get_cache
 from app.core.dart.client import DartClient
 from app.core.search import tavily
@@ -33,6 +35,7 @@ async def lifespan(app: FastAPI):
     http = httpx.AsyncClient(timeout=10, follow_redirects=True)
     await tavily.init_free_credits(http)
     law_tools = await _open_law_tools()
+    warm = asyncio.create_task(reranker.warmup()) if law_tools else None   # 시작을 막지 않는다
     runner = make_runner(build_legal_graph(), law_tools) if law_tools else None
     db = get_settings().sqlite_path
     db = db if db.is_absolute() else BACKEND_DIR / db
@@ -44,6 +47,8 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        if warm:
+            warm.cancel()
         await conn.close()
         if law_tools:
             await law_tools.close()

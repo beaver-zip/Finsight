@@ -1,6 +1,6 @@
 """로컬 리랭커(bge-reranker-v2-m3, sentence-transformers CrossEncoder). 점수는 0–1(시그모이드).
 
-모델은 처음 부를 때 한 번 올린다(약 2.3GB, ~/.cache/huggingface). GPU(MPS)가 있으면 쓰고, 호출은 스레드로 넘기고 지연을 기록한다.
+모델은 처음 부를 때 한 번 올린다(약 2.3GB, ~/.cache/huggingface). 법령 리서치가 켜지면 서버 시작 때 백그라운드로 미리 올린다. GPU(MPS)가 있으면 쓰고, 호출은 스레드로 넘기고 지연을 기록한다.
 """
 from __future__ import annotations
 
@@ -34,6 +34,18 @@ def _score_sync(query: str, texts: list[str]) -> list[float]:
 
 
 _lock = asyncio.Lock()
+
+
+async def warmup() -> None:
+    """첫 법령 질문이 torch import·모델 로딩(이 Mac에서 약 20초)을 기다리지 않게 미리 올린다. 실패하면 첫 rerank가 다시 시도한다."""
+    t0 = time.perf_counter()
+    try:
+        async with _lock:                  # 요청의 rerank와 겹쳐도 모델을 두 번 올리지 않는다
+            await asyncio.to_thread(_model)
+    except Exception as e:  # noqa: BLE001
+        log.warning("리랭커 예열 실패: %s", type(e).__name__)
+        return
+    log.info("리랭커 예열 %.1f초", time.perf_counter() - t0)
 
 
 async def rerank(query: str, texts: list[str]) -> list[float]:
