@@ -1,4 +1,4 @@
-// components/steps/Step2_Trigger.tsx
+// components/steps/TriggerModal.tsx
 import { useState } from "react";
 import { Button } from "../Button";
 import { BASE_URL } from "../../api/baseUrl";

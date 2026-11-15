@@ -32,12 +32,7 @@ function Chatbot() {
   // 지식베이스(사용자가 올린 내규 PDF): 업로드 → 벡터 적재 → 목록·삭제
   const { files: collectionFiles, refetch: refetchCollectionFiles } = useCollectionFiles();
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [currentStep, setCurrentStep] = useState(1);
-  const [uploadedFiles, setUploadedFiles] = useState<string[]>([]);
-  const openModal = () => {
-    setCurrentStep(1);
-    setIsModalOpen(true);
-  };
+  const openModal = () => setIsModalOpen(true);
   const closeModal = () => {
     setIsModalOpen(false);
     refetchCollectionFiles();
@@ -189,21 +184,8 @@ function Chatbot() {
         </div>
       </header>
 
-      {isModalOpen && (
-        <Modal
-          currentStep={currentStep}
-          uploadedFiles={uploadedFiles}
-          onClose={closeModal}
-          onUploadSuccess={(files) => {
-            setUploadedFiles(files);
-            setCurrentStep(2);
-          }}
-          onTriggerSuccess={() => {
-            setCurrentStep(3);
-            refetchCollectionFiles();
-          }}
-        />
-      )}
+      {/* 열 때마다 새로 마운트되므로 Modal의 단계는 1부터 시작한다 */}
+      {isModalOpen && <Modal onClose={closeModal} />}
 
       {hasMessages ? (
         <div className="flex min-h-0 flex-1 flex-col">
