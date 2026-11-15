@@ -129,7 +129,7 @@ async def test_history_fills_from_original_and_derives_quarter(monkeypatch):
 
     async def fake_original(dart, corp, periods, acc):
         assert set(periods) == {(2022, 4), (2023, 1), (2023, 2)}          # API에 없는 최근 분기만
-        return {p: orig[p] for p in periods if p in orig}
+        return {p: orig[p] for p in periods if p in orig}, {}
 
     monkeypatch.setattr(history, "_snap", fake_snap)
     monkeypatch.setattr(history, "from_original", fake_original)
