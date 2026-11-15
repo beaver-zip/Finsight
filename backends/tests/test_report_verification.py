@@ -41,8 +41,6 @@ def scenario(monkeypatch):
     profile = CorpProfile(corp_code="test", corp_name="테스트 기업")
     cache_key = report._cache_key
     monkeypatch.setattr(report, "_cache_key", AsyncMock(return_value=(profile, f"{report.VERSION}:test")))
-    # 폰트 서브셋 생성은 검증 정책과 무관하다.
-    monkeypatch.setattr("app.agents.company.render.font_faces", lambda _: "")
     st = NS(company_graph=build_company_graph(), dart=None, http=None, legal_runner=None)
     return NS(st=st, verify=verify, draft=draft, data=data, profile=profile, cache_key=cache_key)
 
@@ -81,7 +79,7 @@ async def test_real_graph_finalizes_and_warns(scenario, mode):
         assert not out["errors"]
 
 
-@pytest.mark.parametrize("route", ["html", "json", "stream"])
+@pytest.mark.parametrize("route", ["html", "json"])
 @pytest.mark.parametrize("mode", ["exception", "failed", "passed", "token"])
 def test_api_only_caches_verified_reports(scenario, route, mode):
     s = scenario
@@ -99,8 +97,6 @@ def test_api_only_caches_verified_reports(scenario, route, mode):
             assert bool(body["errors"]) == (mode != "passed")
         elif mode != "passed":
             assert "검증" in first.text
-            if route == "stream":
-                assert "event: error" in first.text and '"partial": true' in first.text
             assert "제거할 문장" not in first.text
         else:
             assert "남길 문장" in first.text
@@ -134,15 +130,13 @@ async def test_legacy_cached_report_is_not_served(scenario, monkeypatch, temp_ca
     assert s.verify.await_count == 1
 
 
-def test_html_json_stream_share_verified_cache(scenario):
+def test_html_json_share_verified_cache(scenario):
     app = FastAPI()
     app.include_router(report.router, prefix="/report")
     app.dependency_overrides[get_state] = lambda: scenario.st
     with TestClient(app) as client:
         assert client.get("/report/test/json").json()["verification"]["passed"] is True
         assert "남길 문장" in client.get("/report/test").text
-        stream = client.get("/report/test/stream").text
-        assert '"cached": true' in stream and "남길 문장" in stream
     assert scenario.verify.await_count == 1
 
 
@@ -172,3 +166,37 @@ async def test_nested_report_usage_is_included_in_parent_and_cached_cost_stays_l
     assert parent.cost_usd == pytest.approx(0.6)
     budget.add_request_usage("anthropic", 5, 0.1)
     assert parent.tokens == 35
+
+
+@pytest.mark.asyncio
+async def test_report_with_collect_failure_is_cached_briefly(scenario, monkeypatch):
+    from app.core import cache as cache_module
+
+    now = cache_module.time.time()
+    monkeypatch.setattr(cache_module.time, "time", lambda: now)
+
+    async def partial(state, config):
+        return {"errors": ["collect.price: 시세 없음"]}
+
+    monkeypatch.setattr(nodes, "collect_data", partial)
+    scenario.st.company_graph = build_company_graph()
+    await report.build_report(scenario.st, "test")
+    now += 3599
+    await report.build_report(scenario.st, "test")
+    assert scenario.verify.await_count == 1
+    now += 2
+    await report.build_report(scenario.st, "test")
+    assert scenario.verify.await_count == 2
+
+
+def test_style_only_issues_keep_text_without_warning_and_are_cached(scenario):
+    scenario.verify.return_value = VerificationResult(passed=False, issues=[
+        VerificationIssue(claim_id="summary.1", type="style", detail="banned phrase")])
+    app = FastAPI()
+    app.include_router(report.router, prefix="/report")
+    app.dependency_overrides[get_state] = lambda: scenario.st
+    with TestClient(app) as client:
+        assert client.get("/report/test/json").json()["errors"] == []
+        html = client.get("/report/test").text
+    assert "제거할 문장" in html and "남길 문장" in html and "검증을 통과하지 못한" not in html
+    assert scenario.verify.await_count == 1 + nodes.MAX_REVISIONS

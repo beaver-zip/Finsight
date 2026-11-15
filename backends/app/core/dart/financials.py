@@ -59,13 +59,12 @@ async def _fetch(dart: DartClient, corp_code: str, bsns_year: int, reprt_code: s
 
 async def get_snapshot(dart: DartClient, corp_code: str, bsns_year: int, reprt_code: str, *,
                        acc_mt: int | None = 12, expected_rcept_no: str | None = None) -> FinancialSnapshot | None:
-    """정상 응답은 1시간, 빈 응답은 5분 캐시. 알려진 정정 접수번호가 다르면 즉시 다시 받는다."""
+    """정상 응답은 1시간, 빈 응답은 5분 캐시. 키에 기대 접수번호(목록의 최종 정정본)를 넣어 새 정정이 나오면
+    한 번 다시 받는다. 재무 API가 계속 옛 번호를 주면(첨부정정, 반영 지연) 그 값을 TTL 동안 그대로 쓴다."""
     cache = get_cache()
     for fs_div in ("CFS", "OFS"):
-        key = f"{corp_code}:{bsns_year}:{reprt_code}:{fs_div}"
+        key = f"{corp_code}:{bsns_year}:{reprt_code}:{fs_div}:{expected_rcept_no or ''}"
         rows = await cache.get(_CACHE_NS, key)
-        if rows is not None and rows and expected_rcept_no and rows[0].get("rcept_no") != expected_rcept_no:
-            rows = None
         if rows is None:
             try:
                 rows = await _fetch(dart, corp_code, bsns_year, reprt_code, fs_div)

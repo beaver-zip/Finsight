@@ -110,15 +110,22 @@ async def test_refresh_error_does_not_overwrite_cached_data():
     dart.json.side_effect = DartError("800", "maintenance")
     with pytest.raises(DartError):
         await financials.get_snapshot(dart, "corp", 2024, "11013", expected_rcept_no="corrected")
-    assert await financials.get_snapshot(dart, "corp", 2024, "11013", expected_rcept_no="old") == old
+    assert await financials.get_snapshot(dart, "corp", 2024, "11013") == old
 
 
 @pytest.mark.asyncio
-async def test_upstream_lag_does_not_relabel_old_receipt():
+async def test_upstream_lag_does_not_relabel_old_receipt_and_retries_after_ttl(monkeypatch):
+    now = cache_module.time.time()
+    monkeypatch.setattr(cache_module.time, "time", lambda: now)
     dart = NS(json=AsyncMock(return_value={"list": rows()}))
     snap = await financials.get_snapshot(dart, "corp", 2024, "11013", expected_rcept_no="corrected")
     assert snap.rcept_no == "old"
     dart.json.return_value = {"list": rows("corrected", "150")}
+    # 재무 API가 계속 옛 번호를 주는 정정(첨부정정 등)도 1시간 동안은 다시 받지 않는다
+    now += 3599
+    assert (await financials.get_snapshot(dart, "corp", 2024, "11013", expected_rcept_no="corrected")).rcept_no == "old"
+    assert dart.json.await_count == 1
+    now += 2
     assert (await financials.get_snapshot(dart, "corp", 2024, "11013", expected_rcept_no="corrected")).rcept_no == "corrected"
 
 
@@ -147,6 +154,43 @@ async def test_report_list_outage_keeps_available_financial_history(monkeypatch)
     dart = NS(json=AsyncMock(return_value={"list": rows()}))
     result = await history.quarterly_history(dart, "corp", (2024, 1), first_year=2024, use_original=False)
     assert result.quarters[0].revenue == Decimal("100")
+
+
+@pytest.mark.asyncio
+async def test_quarter_outage_keeps_other_quarters_and_is_reported(monkeypatch):
+    from app.core.dart.client import DartLimit
+
+    monkeypatch.setattr(history.original, "periodic_reports", AsyncMock(return_value={}))
+
+    async def json(endpoint, **params):
+        if params["reprt_code"] == "11012":
+            raise DartLimit("020", "limit")
+        return {"list": rows()}
+
+    dart = NS(json=AsyncMock(side_effect=json))
+    result = await history.quarterly_history(dart, "corp", (2024, 2), first_year=2024, use_original=False)
+    assert result.quarters[0].revenue == Decimal("100") and result.quarters[1].revenue is None
+    assert result.errors == ["2Q24: DartLimit: OpenDART 020: limit"]
+
+
+@pytest.mark.asyncio
+async def test_original_statements_are_fetched_concurrently_and_failures_skipped(monkeypatch):
+    import asyncio
+
+    reports = {(2023, "11013"): "r1", (2023, "11012"): "r2", (2023, "11014"): "r3"}
+    monkeypatch.setattr(history.original, "periodic_reports", AsyncMock(return_value=reports))
+    both = asyncio.Barrier(3)
+
+    async def statements(dart, rcept_no, reprt_code):
+        await asyncio.wait_for(both.wait(), 1)     # 차례로 받으면 시간 초과
+        if rcept_no == "r3":
+            raise RuntimeError("broken zip")
+        return rows(rcept_no), "OFS"
+
+    monkeypatch.setattr(history.original, "statements", statements)
+    out = await history.from_original(None, "corp", [(2023, 1), (2023, 2), (2023, 3), (2023, 4)], 12)
+    assert sorted(out) == [(2023, 1), (2023, 2)]
+    assert out[(2023, 2)].rcept_no == "r2" and out[(2023, 2)].fs_div == "OFS"
 
 
 @pytest.mark.asyncio

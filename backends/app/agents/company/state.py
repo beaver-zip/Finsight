@@ -26,7 +26,7 @@ class CompanyState(TypedDict, total=False):
     legal_texts: dict[str, str]                # 조문 key → 본문(검증용)
     draft: ReportDraft | None
     verification: VerificationResult | None
-    judged: dict[str, Any]                     # 주장 텍스트 → LLM 판정 결과(재검증 생략용)
+    judged: dict[str, Any]                     # 주장(문장+근거 ID) → LLM 판정 결과(재검증 생략용)
     attempts: int
     html: str
     errors: Annotated[list[str], operator.add]  # 병렬 노드의 오류 누적

@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime
 from functools import wraps
@@ -90,8 +91,7 @@ async def get_disclosures(state: CompanyState, config: RunnableConfig) -> dict:
 async def get_news(state: CompanyState, config: RunnableConfig) -> dict:
     deps = _deps(config)
     _progress("news.search", "측면별 질의 3개 검색 중")
-    disclosures = await dart_filings.disclosures(deps["dart"], state["corp"].corp_code)  # 1시간 캐시
-    res = await run_pipeline(state["corp"], disclosures, http=deps["http"],
+    res = await run_pipeline(state["corp"], state.get("disclosures", []), http=deps["http"],
                              config=deps.get("news_config") or NewsConfig())
     texts = {}
     by_url = {c.url: c for c in res.candidates}
@@ -144,31 +144,27 @@ async def regulatory_check(state: CompanyState, config: RunnableConfig) -> dict:
     runner: LegalRunner | None = _deps(config).get("legal_runner")
     if not trig:
         return {"triggers": [], "regulatory": [], "legal_texts": {}}
-    questions = []
-    name = state["corp"].corp_name
-    if "financial" in trig:
-        questions.append(FINANCIAL_QUESTION)
-    if "news" in trig:
-        art = max((n for n in state["news"] if n.aspect == "리스크·규제"), key=lambda n: n.score or 0)
-        q = await llm.structured(_Question, [{"role": "user", "content":
-            f"기업: {name}\n규제 관련 기사 제목: {art.title}\n요약: {' '.join(art.analysis.summary) if art.analysis else ''}\n\n"
-            "이 기사와 관련해 전자금융거래법령에서 확인할 질문 1개를 한 문장으로 써라."}],
-            effort="medium", task="company.reg_question")
-        questions.append(q.question)
-    if "disclosure" in trig:
-        d = next(d for d in state["disclosures"] if any(w in d.report_nm for w in SANCTION_WORDS))
-        q = await llm.structured(_Question, [{"role": "user", "content":
-            f"기업: {name}\n제재 관련 공시 제목: {d.report_nm} ({d.rcept_dt})\n\n"
-            "이 공시와 관련해 전자금융거래법령에서 확인할 질문 1개를 한 문장으로 써라."}],
-            effort="medium", task="company.reg_question")
-        questions.append(q.question)
-    if runner is None:
+    if runner is None:      # 질문 LLM 호출 전에 확인한다. 결과를 버릴 호출에 비용을 쓰지 않는다
         return {"triggers": trig, "regulatory": [], "legal_texts": {},
                 "errors": ["regulatory: 법령 서브그래프가 연결되지 않아 규제 검토를 건너뛰었다"]}
-    findings, texts = [], {}
-    for q in questions[:3]:
+    prompts = []
+    name = state["corp"].corp_name
+    if "news" in trig:
+        art = max((n for n in state["news"] if n.aspect == "리스크·규제"), key=lambda n: n.score or 0)
+        prompts.append(f"기업: {name}\n규제 관련 기사 제목: {art.title}\n요약: {' '.join(art.analysis.summary) if art.analysis else ''}\n\n"
+                       "이 기사와 관련해 전자금융거래법령에서 확인할 질문 1개를 한 문장으로 써라.")
+    if "disclosure" in trig:
+        d = next(d for d in state["disclosures"] if any(w in d.report_nm for w in SANCTION_WORDS))
+        prompts.append(f"기업: {name}\n제재 관련 공시 제목: {d.report_nm} ({d.rcept_dt})\n\n"
+                       "이 공시와 관련해 전자금융거래법령에서 확인할 질문 1개를 한 문장으로 써라.")
+    asked = await asyncio.gather(*(llm.structured(_Question, [{"role": "user", "content": p}], effort="medium",
+                                                  task="company.reg_question") for p in prompts))
+    questions = ([FINANCIAL_QUESTION] if "financial" in trig else []) + [q.question for q in asked]
+    for q in questions:
         _progress("company.regulatory", q)
-        answer, t = await runner(q)
+    results = await asyncio.gather(*(runner(q) for q in questions))   # 러너는 호출마다 상태를 새로 만든다
+    findings, texts = [], {}
+    for q, (answer, t) in zip(questions, results):
         findings.append(LegalFinding(question=q, answer=answer))
         texts.update(t)
     return {"triggers": trig, "regulatory": findings, "legal_texts": texts}
@@ -245,7 +241,7 @@ async def assemble(state: CompanyState, config: RunnableConfig) -> dict:
     if draft is not None:
         if ver is None:
             warning = "본문 검증을 완료하지 못해 생성 문장을 표시하지 않습니다. 계산된 표·차트만 제공합니다."
-        elif not ver.passed:
+        elif any(i.type != "style" for i in ver.issues):   # 문체 지적만 남으면 finalize가 문장을 남긴다
             warning = "본문이 검증을 통과하지 못한 부분이 있습니다. 근거 문제가 남은 문장은 제외했습니다."
         if warning:
             errs.append(f"verify: {warning}")
@@ -258,5 +254,6 @@ async def assemble(state: CompanyState, config: RunnableConfig) -> dict:
     fs = None
     if col is not None and col.quarters:
         fs = col.quarters[-1].fs_div
-    html = render_report(data, draft, fs_div=fs, warning=warning)
+    # 폰트 서브셋이 CPU를 수 초 쓰므로 이벤트 루프 밖에서 그린다
+    html = await asyncio.to_thread(render_report, data, draft, fs_div=fs, warning=warning)
     return {"draft": draft, "html": html, "errors": errs}
