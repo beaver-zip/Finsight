@@ -231,8 +231,8 @@ async def revise(state: OrchestratorState) -> dict:
         claims = await synthesize(_question(state), state.get("results") or [],
                                   issues=state["verification"].issues, prev=state.get("claims"))
     except Exception as e:  # noqa: BLE001
-        return {"verification": state["verification"].model_copy(update={"passed": True}),
-                "errors": [f"revise: {type(e).__name__}: {e}"]}
+        # 주장이 그대로라 다음 검증은 캐시로 같은 실패를 낸다: 재작성을 다시 부르지 말고 finish로 보낸다
+        return {"attempts": MAX_REVISIONS + 1, "errors": [f"revise: {type(e).__name__}: {e}"]}
     return {"claims": claims}
 
 

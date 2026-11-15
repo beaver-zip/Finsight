@@ -227,6 +227,33 @@ async def test_failed_claims_are_revised_then_finalized(monkeypatch, patched):
     assert "결론입니다." in md and "과장된 문장입니다. (근거 불충분)" in md and "근거 없는" not in md
 
 
+async def test_failed_revise_is_not_retried(monkeypatch, patched):
+    # 재작성이 실패하면 다음 검증은 캐시로 같은 실패를 내므로, 실패할 재작성을 다시 부르지 않고 끝낸다
+    async def r(msgs, mode="auto"):
+        return Route(intent="composite", company=None, sub_tasks=[SubTask(agent="legal", instruction="a"),
+                                                                   SubTask(agent="legal", instruction="b")],
+                     clarification=None)
+    monkeypatch.setattr(G, "route", r)
+    n = {"synth": 0}
+
+    async def synth(q, results, issues=None, prev=None):
+        n["synth"] += 1
+        if issues:
+            raise G.llm.StructuredOutputError("재작성 실패")
+        return [Claim(id="c1", text="결론입니다."), Claim(id="c2", text="근거 없는 문장입니다.")]
+    monkeypatch.setattr(G, "synthesize", synth)
+
+    async def fail(claims, ev, judged=None):
+        return VerificationResult(passed=False, issues=[VerificationIssue(claim_id="c2", type="unsupported",
+                                                                          detail="근거 없음")])
+    monkeypatch.setattr(G.verifier, "verify", fail)
+    g = G.build_orchestrator(InMemorySaver())
+    out = await g.ainvoke({"messages": [HumanMessage("x")], "mode": "auto"}, config=_cfg("t-rev"))
+    assert n["synth"] == 2 and any(e.startswith("revise:") for e in out["errors"])
+    md = out["answer"].markdown
+    assert "결론입니다." in md and "근거 없는" not in md
+
+
 async def test_second_turn_resets_results(monkeypatch, patched):
     async def r(msgs, mode="auto"):
         return Route(intent="legal", company=None, sub_tasks=[SubTask(agent="legal", instruction="q")],
