@@ -2,7 +2,8 @@ import React, { useEffect, useRef, useState } from "react";
 import { Paperclip, ArrowUp, Trash2, FileText, Plus } from "lucide-react";
 import { RAGDropdown } from "./RAGDropdown";
 import type { CollectionFile } from "../hooks/useCollectionFiles";
-import { useDeleteFile } from "../hooks/useDeleteFile";
+import { deleteDoc } from "../api/documents";
+import { BASE_URL } from "../api/baseUrl";
 import type { QueryMode } from "../hooks/useChatStream";
 
 type ChatFormProps = {
@@ -38,7 +39,6 @@ export function ChatForm({
 }: ChatFormProps) {
   const [showFilePanel, setShowFilePanel] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
-  const { deleteFile } = useDeleteFile();
 
   // 패널 외부 클릭 시 닫기
   useEffect(() => {
@@ -135,8 +135,12 @@ export function ChatForm({
                           type="button"
                           aria-label={`${file.file_name} 삭제`}
                           onClick={async () => {
-                            await deleteFile(file.file_name); // 삭제가 끝난 뒤 목록을 다시 읽는다
-                            handleFileDelete(file.file_name);
+                            try {
+                              await deleteDoc(BASE_URL, file.file_name);
+                            } catch (err) {
+                              alert((err as Error).message);
+                            }
+                            handleFileDelete(file.file_name); // 삭제가 끝난 뒤 목록을 다시 읽는다
                           }}
                           className="shrink-0 rounded p-1 text-ink-300 opacity-0 transition-opacity hover:bg-red-50 hover:text-red-500 group-hover:opacity-100"
                         >

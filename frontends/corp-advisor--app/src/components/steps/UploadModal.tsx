@@ -32,6 +32,7 @@ export function UploadModal({ onUploadSuccess }: UploadModalProps) {
       }
     } catch (err) {
       console.error("파일 업로드에 실패했습니다:", err);
+      setUploadError("업로드에 실패했습니다. 서버 상태를 확인해 주세요.");
     } finally {
       setIsUploading(false);
     }
