@@ -263,6 +263,12 @@ def _q_of(rc: str) -> int:
 
 
 # ---------------- 최근 분기
+def _ttm(by: dict[str, QRow], year: int, q: int, k: str) -> float | None:
+    """(year, q)까지 이어진 4개 분기 합. 한 분기라도 없으면 None(빈 분기를 0으로 더하지 않는다)."""
+    vals = [f(getattr(r, k)) if (r := by.get(qkey(*prev_quarter(year, q, n)))) else None for n in range(4)]
+    return None if None in vals else sum(vals)
+
+
 def _growth(cur: float | None, base: float | None) -> float | None:
     if cur is None or base is None or base <= 0 or cur <= 0:
         return None
@@ -338,17 +344,19 @@ def _latest(c: dict) -> None:
         c_opm = c_op / c_rev * 100 if c_rev and c_op else None
         who = f"{cons.provider} 컨센서스" if cons.provider else "컨센서스"
         src = f"{cons.outlet} 보도" if cons.outlet else None
+        rev_vs = (rev / c_rev - 1) * 100 if rev is not None and c_rev else None     # 잠정 공시에 매출이 없을 수 있다
+        op_vs = (op / c_op - 1) * 100 if op is not None and c_op else None
         if c_rev:
             F.add("cons_rev", lk, f"{who} 매출액({cons.period})", fmt.money(c_rev), c_rev, "KRW", source=src)
-            F.add("rev_vs_cons", lk, "매출액 컨센서스 대비", fmt.vs((rev / c_rev - 1) * 100), (rev / c_rev - 1) * 100, "%")
+            F.add("rev_vs_cons", lk, "매출액 컨센서스 대비", fmt.vs(rev_vs), rev_vs, "%")
         if c_op:
             F.add("cons_op", lk, f"{who} 영업이익({cons.period})", fmt.money(c_op), c_op, "KRW", source=src)
-            F.add("op_vs_cons", lk, "영업이익 컨센서스 대비", fmt.vs((op / c_op - 1) * 100), (op / c_op - 1) * 100, "%")
+            F.add("op_vs_cons", lk, "영업이익 컨센서스 대비", fmt.vs(op_vs), op_vs, "%")
         if c_opm is not None and opm is not None:
             F.add("cons_opm", lk, "컨센서스 영업이익률", fmt.pct(c_opm), c_opm, "%")
             F.add("opm_vs_cons", lk, "영업이익률 컨센서스 대비", fmt.pp(opm - c_opm), opm - c_opm, "%p")
-        cons_cells = {"rev": (fmt.tbl(c_rev, div), _sgn_cell((rev / c_rev - 1) * 100 if c_rev else None)),
-                      "op": (fmt.tbl(c_op, div), _sgn_cell((op / c_op - 1) * 100 if c_op else None)),
+        cons_cells = {"rev": (fmt.tbl(c_rev, div), _sgn_cell(rev_vs)),
+                      "op": (fmt.tbl(c_op, div), _sgn_cell(op_vs)),
                       "opm": (fmt.num(c_opm), _sgn_cell(opm - c_opm if c_opm is not None and opm is not None else None, "%p"))}
         c["cons"] = {"op": c_op, "rev": c_rev}
 
@@ -498,25 +506,28 @@ def _annual(c: dict) -> None:
         F.add("rev", fy, f"매출액({y}년)", fmt.money(rev), rev, "KRW")
         F.add("op", fy, f"영업이익({y}년)", fmt.money(op), op, "KRW")
         F.add("ni", fy, f"지배주주 순이익({y}년)", fmt.money(ni), ni, "KRW")
-        if len(cols) >= 2:
+        if len(cols) >= 2 and heads[-2] == str(y - 1):        # 빠진 해가 있으면 2년 전과 비교하지 않는다
             prev = cols[-2]
             for k, lab in (("rev", "매출액"), ("op", "영업이익")):
                 g = _growth(cols[-1][k], prev[k])
                 F.add(f"{k}_yoy", fy, f"{lab} 전년 대비({y - 1}년 → {y}년)", fmt.change(g), g, "%")
     # 최근 4개 분기와 최근 분기×4
     if len(qs) >= 5:
-        last4 = qs[-4:]
-        ttm = {k: sum(f(getattr(r, k)) or 0 for r in last4) for k in ("revenue", "operating_income", "net_income_owners")}
         lastq = qs[-1]
+        ttm = {k: _ttm(by, lastq.year, lastq.q, k) for k in ("revenue", "operating_income", "net_income_owners")}
+        ni_t = ttm["net_income_owners"]
+        q0 = by.get(qkey(*prev_quarter(lastq.year, lastq.q, 3)))
+        y0 = by.get(qkey(*prev_quarter(lastq.year, lastq.q, 4)))
         sh_now = _shares_at(inp, (lastq.year, lastq.q))
-        e_now, e_prev = f(lastq.equity_owners), f(qs[-5].equity_owners)
+        e_now, e_prev = f(lastq.equity_owners), f(y0.equity_owners) if y0 else None
         price = c.get("last_px")
-        eps_ttm = ttm["net_income_owners"] / sh_now if sh_now else None
+        eps_ttm = ni_t / sh_now if ni_t is not None and sh_now else None
         bps_now = e_now / sh_now if e_now and sh_now else None
-        roe_ttm = ttm["net_income_owners"] / ((e_now + e_prev) / 2) * 100 if e_now and e_prev else None
-        ttm_label = f"{last4[0].key}–{last4[-1].key}"
-        cols.append({"rev": ttm["revenue"], "op": ttm["operating_income"], "ni": ttm["net_income_owners"],
-                     "opm": ttm["operating_income"] / ttm["revenue"] * 100 if ttm["revenue"] else None,
+        roe_ttm = ni_t / ((e_now + e_prev) / 2) * 100 if ni_t is not None and e_now and e_prev else None
+        ttm_label = f"{qkey(*prev_quarter(lastq.year, lastq.q, 3))}–{lastq.key}"
+        cols.append({"rev": ttm["revenue"], "op": ttm["operating_income"], "ni": ni_t,
+                     "opm": ttm["operating_income"] / ttm["revenue"] * 100
+                     if ttm["revenue"] and ttm["operating_income"] is not None else None,
                      "eps": eps_ttm, "bps": bps_now, "per": price / eps_ttm if price and eps_ttm and eps_ttm > 0 else None,
                      "pbr": price / bps_now if price and bps_now else None, "roe": roe_ttm, "dps": None})
         heads.append(ttm_label)
@@ -531,16 +542,15 @@ def _annual(c: dict) -> None:
                      "roe": rr_ni / e_now * 100 if rr_ni is not None and e_now else None, "dps": None})
         heads.append(rr_label)
         c.update(ttm_label=ttm_label, rr_label=rr_label, eps_ttm=eps_ttm, bps_now=bps_now, roe_ttm=roe_ttm,
-                 per_ttm=cols[-2]["per"], per_rr=cols[-1]["per"], pbr_now=cols[-2]["pbr"], ni_ttm=ttm["net_income_owners"],
+                 per_ttm=cols[-2]["per"], per_rr=cols[-1]["per"], pbr_now=cols[-2]["pbr"], ni_ttm=ni_t,
                  rr_ni=rr_ni)
-        F.add("ni_ttm", "ttm", f"최근 4개 분기({ttm_label}) 지배주주 순이익", fmt.money(ttm["net_income_owners"]), ttm["net_income_owners"], "KRW")
+        F.add("ni_ttm", "ttm", f"최근 4개 분기({ttm_label}) 지배주주 순이익", fmt.money(ni_t), ni_t, "KRW")
         F.add("per", "ttm", f"PER(최근 4개 분기 이익, {fmt.md(c.get('last_d', inp.today))} 종가)", fmt.times(cols[-2]["per"]), cols[-2]["per"], "x")
         F.add("per", "rr", f"PER({rr_label} 지배순이익 기준, 단순 연환산)", fmt.times(cols[-1]["per"]), cols[-1]["per"], "x")
         F.add("pbr", "now", "PBR(최근 분기말 지배주주 자본 기준)", fmt.times(cols[-2]["pbr"], 2), cols[-2]["pbr"], "x")
         F.add("roe", "ttm", "ROE(최근 4개 분기, 평균 자본)", fmt.pct(roe_ttm), roe_ttm, "%")
         F.add("ni", lastq.key, f"지배주주 순이익({lastq.key})", fmt.money(f(lastq.net_income_owners)), f(lastq.net_income_owners), "KRW")
-        if len(qs) >= 4:
-            q0 = last4[0]
+        if q0:
             F.add("ni", q0.key, f"지배주주 순이익({q0.key})", fmt.money(f(q0.net_income_owners)), f(q0.net_income_owners), "KRW")
         data.key_data += [
             {"label": "PER", "value": fmt.times(cols[-2]["per"]), "sub": f"{rr_label} 기준 {fmt.times(cols[-1]['per'])}"},
@@ -701,19 +711,18 @@ def _u(v: float, data: ReportData) -> str:
 
 # ---------------- 밸류에이션(PBR 밴드·PER)
 def _valuation(c: dict) -> None:
-    inp, F, data, qs = c["inp"], c["F"], c["data"], c["qs"]
+    inp, F, data, qs, by = c["inp"], c["F"], c["data"], c["qs"], c["by"]
     px = inp.px
     if not px or len(qs) < 8:
         return
     pts = []   # (가용일, bps, eps_ttm)
-    for i, r in enumerate(qs):
+    for r in qs:
         sh = _shares_at(inp, (r.year, r.q))
         if not sh or r.equity_owners is None or not r.rcept_no:
             continue
         avail = date(int(r.rcept_no[:4]), int(r.rcept_no[4:6]), int(r.rcept_no[6:8]))
-        last4 = qs[max(0, i - 3):i + 1]
-        eps = (sum(f(x.net_income_owners) for x in last4) / sh
-               if len(last4) == 4 and all(x.net_income_owners is not None for x in last4) else None)
+        ni4 = _ttm(by, r.year, r.q, "net_income_owners")
+        eps = ni4 / sh if ni4 is not None else None
         pts.append((avail, f(r.equity_owners) / sh, eps))
     pts.sort()
     if not pts:

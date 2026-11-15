@@ -173,6 +173,51 @@ def test_prelim_path_uses_disclosed_growth_and_consensus():
     assert data.charts["op"]["cons"] == pytest.approx(580e8)
 
 
+def test_ttm_sums_four_consecutive_quarters():
+    data = analyze(_inputs())
+    last4 = _quarters()[-4:]                             # 3Q25~2Q26
+    ni = sum(float(r.net_income_owners) for r in last4)
+    sh = 98_000_000
+    eq = (float(last4[-1].equity_owners) + float(_quarters()[-5].equity_owners)) / 2
+    assert data.facts["ni_ttm.ttm"].value == pytest.approx(D(str(round(ni, 6))))
+    assert float(data.facts["roe.ttm"].value) == pytest.approx(ni / eq * 100, rel=1e-6)
+    px = _px()[-1][1]
+    assert float(data.facts["per.ttm"].value) == pytest.approx(px / (ni / sh), rel=1e-6)
+
+
+@pytest.mark.parametrize("hole", ["value", "row"])
+def test_ttm_with_missing_quarter_is_dropped_not_zero(hole):
+    inp = _inputs()
+    if hole == "value":
+        inp.quarters[-2].net_income_owners = None        # 1Q26 순이익만 없다
+    else:
+        del inp.quarters[-2]                             # 1Q26 분기가 통째로 없다
+    data = analyze(inp)
+    assert data.notes == []
+    assert not {"ni_ttm.ttm", "per.ttm", "roe.ttm"} & set(data.facts)
+    assert "per.rr" in data.facts                        # 최근 분기×4는 그대로
+
+
+def test_annual_growth_needs_the_previous_year():
+    data = analyze(_inputs())
+    assert data.facts["rev_yoy.FY25"].value == pytest.approx(D(str(round((6e12 / 5.5e12 - 1) * 100, 6))))
+    inp = _inputs()
+    del inp.cum[(2024, 4)]
+    data = analyze(inp)
+    assert "rev_yoy.FY25" not in data.facts              # 2023년과 비교해 '2024년 → 2025년'이라 쓰지 않는다
+
+
+def test_prelim_without_revenue_keeps_latest_table():
+    p = Prelim("20261008800004", date(2026, 10, 8), "연결재무제표기준영업(잠정)실적(공정공시)", 2026, 3, "억원", True,
+               rows={"operating_income": PrelimRow(cur=D(600e8), qoq=5.55, yoy=782.50)})
+    cons = Consensus("3Q26", 1600e8, 580e8, "에프앤가이드", "n1", "서울경제", "q")
+    data = analyze(_inputs(prelim=p, consensus=cons))
+    assert data.notes == []
+    assert "latest" in data.tables and data.charts["op"]["cons"] == pytest.approx(580e8)
+    assert data.facts["op_vs_cons.3Q26P"].text == "3.4% 상회"
+    assert "rev_vs_cons.3Q26P" not in data.facts
+
+
 def test_render_without_draft_has_no_raw_slots():
     data = analyze(_inputs())
     html = render_report(data, None)
