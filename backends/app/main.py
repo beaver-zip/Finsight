@@ -32,6 +32,7 @@ for _name in ("httpx", "httpcore", "httpx2"):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     get_settings()
+    await get_cache().purge_expired()
     http = httpx.AsyncClient(timeout=10, follow_redirects=True)
     await tavily.init_free_credits(http)
     law_tools = await _open_law_tools()
