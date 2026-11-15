@@ -221,6 +221,27 @@ def test_ttm_sums_four_consecutive_quarters():
     assert float(data.facts["per.ttm"].value) == pytest.approx(px / (ni / sh), rel=1e-6)
 
 
+def test_money_facts_match_hand_calculation():
+    """고정 입력에서 손으로 낸 값과 맞춘다. 공식이 바뀌면(부호, 기간, 분모) 여기서 걸린다."""
+    inp = _inputs()
+    v = {k: float(m.value) for k, m in analyze(inp).facts.items() if m.value is not None}
+    # 잉여현금흐름 = 영업현금흐름 − 유형자산 취득 − 무형자산 취득(10억), 순현금 = 현금 − 차입금
+    assert v["fcf.H126"] == pytest.approx(6e11 - 1.6e11 - 1e9)
+    assert v["fcf.FY25"] == pytest.approx(8e11 - 3e11 - 1e9)
+    assert v["net_cash.H126"] == pytest.approx(1.9e12 - 2e11)
+    assert v["net_cash.FY25"] == pytest.approx(1.4e12 - 2e11)
+    # 최근 4개 분기(3Q25~2Q26) 지배주주 순이익 = 영업이익 × 0.8
+    ni = sum((1000e8 + 20e8 * i) * m / 100 * 0.8 for i, m in zip(range(18, 22), OPM[18:]))
+    assert v["ni_ttm.ttm"] == pytest.approx(ni) == pytest.approx(1260e8)
+    price, shares = inp.px[-1][1], 98_000_000               # 2025년 소각 뒤 주식 수, 마지막 종가
+    assert v["mcap.now"] == pytest.approx(price * shares)
+    assert v["per.ttm"] == pytest.approx(price * shares / ni, rel=1e-6)
+    equity = lambda i: 10_000e8 + 100e8 * i                  # 지배주주 자본(분기 i)
+    assert v["pbr.now"] == pytest.approx(price / (equity(21) / shares), rel=1e-6)
+    assert v["roe.ttm"] == pytest.approx(ni / ((equity(17) + equity(21)) / 2) * 100, rel=1e-6)   # 1년 전·지금 평균 자본
+
+
+
 @pytest.mark.parametrize("hole", ["value", "row"])
 def test_ttm_with_missing_quarter_is_dropped_not_zero(hole):
     inp = _inputs()
