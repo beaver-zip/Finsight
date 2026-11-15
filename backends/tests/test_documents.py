@@ -540,3 +540,10 @@ async def test_upload_during_register_stays_pending(store):
     path = store / "files" / "교체.pdf"
     assert [c.text for c in vec.chunks] == ["V2."] and path.read_bytes() == v2
     assert uploads.pending_path(path).read_bytes() == v3
+
+
+@pytest.mark.asyncio
+async def test_unregistered_upper_case_pdf_is_listed(store):
+    uploads.save_file("Policy.PDF", _pdf("Scanned."))
+    files = (await documents.show_files())["unique_file_name_and_chunk"]
+    assert files == [{"file_name": "Policy.PDF", "chunk_count": 0, "articles": 0}]
