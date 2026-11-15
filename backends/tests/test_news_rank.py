@@ -361,3 +361,30 @@ async def test_partial_summary_outage_marks_news_error_for_short_cache(monkeypat
     out = await nodes.get_news({"corp": CorpProfile(corp_code="1", corp_name="삼성전자")},
                                {"configurable": {"http": None}})
     assert out["errors"] == res.errors and out["news"] == res.items
+
+
+async def test_caller_right_after_last_waiter_cancelled_gets_fresh_run(monkeypatch):
+    # 마지막 호출이 취소된 직후 같은 키로 들어온 호출이 죽어 가는 공유 실행에 붙어 CancelledError를 받지 않는다
+    from app.agents.news import pipeline as P
+    from app.domain.models import CorpProfile
+
+    started, gate = asyncio.Event(), asyncio.Event()
+
+    async def plans(*a, **k):
+        started.set()
+        await gate.wait()
+        return []
+
+    async def search(*a, **k):
+        return []
+    monkeypatch.setattr(P, "plan_queries", plans)
+    monkeypatch.setattr(P, "_search_all", search)
+    corp = CorpProfile(corp_code="1", corp_name="가")
+    only = asyncio.create_task(P.run_pipeline(corp, [], http=None))
+    await started.wait()
+    only.cancel()
+    await asyncio.sleep(0)
+    late = asyncio.create_task(P.run_pipeline(corp, [], http=None))
+    await asyncio.sleep(0)
+    gate.set()
+    assert (await late).note == "최근 기사를 찾지 못했다" and only.cancelled() and not P._running

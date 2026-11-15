@@ -235,7 +235,7 @@ async def run_pipeline(corp: CorpProfile, disclosures: list[Disclosure], *, http
     key = (id(budget.request_root()), corp.corp_code, tuple(d.rcept_no for d in disclosures), repr(config), now)
     if key not in _running:
         _running[key] = asyncio.ensure_future(_run_pipeline(corp, disclosures, http=http, config=config, now=now))
-        _running[key].add_done_callback(lambda _: _running.pop(key, None))
+        _running[key].add_done_callback(lambda t: _running.pop(key) if _running.get(key) is t else None)
     task = _running[key]
     _waiters[task] = _waiters.get(task, 0) + 1
     # shortcut: 비용은 먼저 시작한 호출의 요청 범위(budget.request_scope)에만 잡힌다.
@@ -246,6 +246,8 @@ async def run_pipeline(corp: CorpProfile, disclosures: list[Disclosure], *, http
         _waiters[task] -= 1
         if not _waiters[task]:
             del _waiters[task]
+            if _running.get(key) is task:   # 취소 중인 실행에 새 호출이 붙지 않게 먼저 뺀다
+                del _running[key]
             task.cancel()       # 기다리던 호출이 모두 취소됐으면 유료 검색·요약을 멈춘다(끝난 실행에는 영향 없음)
 
 
