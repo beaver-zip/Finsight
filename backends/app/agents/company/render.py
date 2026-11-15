@@ -169,9 +169,6 @@ class Units:
     def v(self, x: float | None) -> float:
         return (x or 0) / self.div
 
-    def s(self, x: float | None) -> str:
-        return "–" if x is None else f"{x / self.div:,.{self.d}f}"
-
     def full(self, x: float | None) -> str:
         return "–" if x is None else f"{x / self.div:,.{self.d}f}{self.word}"
 
@@ -488,8 +485,6 @@ def ch_events(W: int, sp: dict, u: Units) -> str:
 
 def ch_rel(W: int, sp: dict, u: Units) -> str:
     """최근 1년 주가와 지수(시작일=100)."""
-    from datetime import date as _d
-
     p = P(W)
     H = 220 if p.m else 250
     rows = sp["rows"]
@@ -509,7 +504,7 @@ def ch_rel(W: int, sp: dict, u: Units) -> str:
     b.append(pl(sp_pts, ACC, 2.2))
     dates = [r[0] for r in rows]
     for e in sp.get("events", []):
-        j = min(range(n), key=lambda k: abs((_d.fromisoformat(dates[k]) - _d.fromisoformat(e)).days))
+        j = min(range(n), key=lambda k: abs((date.fromisoformat(dates[k]) - date.fromisoformat(e)).days))
         b.append(f'<circle cx="{sp_pts[j][0]:.1f}" cy="{sp_pts[j][1]:.1f}" r="4" fill="#FFFFFF" stroke="{ACC}" '
                  f'stroke-width="2"><title>{e.replace("-", ".")} 잠정실적 발표</title></circle>')
     for i in range(0, n, max(1, n // (3 if p.m else 4))):
@@ -553,13 +548,13 @@ def figure(fn, sp: dict, u: Units, legend: list | None = None, cls: str = "") ->
 
 
 # ---------------- 표
-def _cell(x) -> tuple[str, str]:
+def _cell(x) -> str:
     if isinstance(x, dict):
         s, v = x.get("sign"), esc(x.get("v", "–"))
         if s is None or round(s, 1) == 0:
-            return v, ""
-        return f'<span class="{"up" if s > 0 else "dn"}">{v}</span>', ""
-    return esc(x), ""
+            return v
+        return f'<span class="{"up" if s > 0 else "dn"}">{v}</span>'
+    return esc(x)
 
 
 def table_html(sp: dict) -> str:
@@ -574,7 +569,7 @@ def table_html(sp: dict) -> str:
         a = f' title="{esc(r["tip"])}"' if r.get("tip") else ""
         cells = []
         for i, x in enumerate(r["cells"]):
-            v, _ = _cell(x)
+            v = _cell(x)
             cl = " ".join(c for c in ("f" if i == focal else "", "sub" if sub else "") if c)
             cells.append(f'<td class="{cl}">{v}</td>' if cl else f"<td>{v}</td>")
         body.append(f'<tr{" class=b" if r.get("bold") else ""}><th scope="row"{" class=sub" if sub else ""}{a}>'
