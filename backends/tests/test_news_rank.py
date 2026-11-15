@@ -117,6 +117,48 @@ async def test_concurrent_pipelines_for_same_corp_share_one_run(monkeypatch):
     assert sorted(planned) == ["1", "1", "2"]
 
 
+async def test_single_flight_is_not_shared_across_requests(monkeypatch):
+    # 공유 실행은 먼저 시작한 요청의 토큰 상한으로 검사된다. 다른 요청이 합류하면 남의 상한 예외를 받는다
+    from app.agents.news import pipeline as P
+    from app.core import budget
+    from app.domain.models import CorpProfile
+    from app.settings import get_settings
+
+    planned = []
+
+    async def plans(corp, *a, **k):
+        planned.append(corp.corp_code)
+        await asyncio.sleep(0)
+        budget.check_request_tokens()                      # llm._guard가 호출마다 하는 검사
+        return []
+
+    async def none(*a, **k):
+        return []
+    monkeypatch.setattr(P, "plan_queries", plans)
+    monkeypatch.setattr(P, "_search_all", none)
+    corp = CorpProfile(corp_code="1", corp_name="가")
+
+    async def request(tokens):
+        budget.start_request().tokens = tokens
+        try:
+            await P.run_pipeline(corp, [], http=None)
+            return "ok"
+        except budget.TokenBudgetExceeded:
+            return "budget"
+    assert await asyncio.gather(request(get_settings().request_token_budget), request(0)) == ["budget", "ok"]
+
+    async def scoped():                                     # 채팅의 리포트 빌드는 같은 요청의 하위 범위에서 돈다
+        with budget.request_scope():
+            return await P.run_pipeline(corp, [], http=None)
+
+    async def one_request():
+        budget.start_request()
+        return await asyncio.gather(P.run_pipeline(corp, [], http=None), scoped())
+    planned.clear()
+    r1, r2 = await asyncio.create_task(one_request())
+    assert planned == ["1"] and r1 is r2
+
+
 @pytest.mark.parametrize("api_error", [False, True])
 async def test_pipeline_researches_missing_aspects_and_fills_failed_summaries(monkeypatch, api_error):
     # 첫 검색이 2개 측면만 덮으면 1년 범위로 재검색하고, 요약에 실패한 기사는 다음 순위 기사로 채운다.

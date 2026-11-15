@@ -13,7 +13,7 @@ import httpx
 import numpy as np
 from pydantic import BaseModel
 
-from app.core import llm
+from app.core import budget, llm
 from app.core.embeddings import cosine_matrix, embed
 from app.core.search.extract import fetch_article
 from app.core.search.news import SearchHit, search_news
@@ -225,10 +225,12 @@ _running: dict[tuple, asyncio.Task] = {}
 
 async def run_pipeline(corp: CorpProfile, disclosures: list[Disclosure], *, http: httpx.AsyncClient,
                        config: NewsConfig | None = None, now: datetime | None = None) -> NewsResult:
-    """같은 기업·공시·설정으로 동시에 들어온 호출은 한 번만 돌리고 결과를 나눈다(채팅 기업+뉴스 질문에서 리포트
-    캐시가 없으면 리포트의 get_news와 뉴스 과업이 겹친다). 끝난 실행은 다시 쓰지 않는다."""
+    """같은 요청 안에서 같은 기업·공시·설정으로 동시에 들어온 호출은 한 번만 돌리고 결과를 나눈다(채팅 기업+뉴스
+    질문에서 리포트 캐시가 없으면 리포트의 get_news와 뉴스 과업이 겹친다). 끝난 실행은 다시 쓰지 않는다."""
     config = config or NewsConfig()
-    key = (corp.corp_code, tuple(d.rcept_no for d in disclosures), repr(config), now)
+    # 공유 실행은 먼저 시작한 호출의 토큰 상한으로 검사되므로 다른 요청과는 나누지 않는다.
+    # id()는 실행 중에 재사용되지 않는다: 공유 태스크의 컨텍스트가 그 요청 범위를 붙잡고 있다
+    key = (id(budget.request_root()), corp.corp_code, tuple(d.rcept_no for d in disclosures), repr(config), now)
     if key not in _running:
         _running[key] = asyncio.ensure_future(_run_pipeline(corp, disclosures, http=http, config=config, now=now))
         _running[key].add_done_callback(lambda _: _running.pop(key, None))
