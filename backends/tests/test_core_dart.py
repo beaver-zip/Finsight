@@ -1,7 +1,11 @@
 """OpenDART 모듈: 캐시 규칙, 상태 코드 처리, 보고서명·주식 수 파서."""
 from __future__ import annotations
 
+import io
 import time
+import zipfile
+
+from app.core.cache import SQLiteCache, set_cache
 
 from app.core.dart import corp, shares
 from app.core.dart.client import DartError, DartNoData
@@ -46,3 +50,28 @@ async def test_corp_list_uses_expired_list_when_dart_is_down(temp_cache):
     dart = FakeDart(DartError("800", "시스템 점검"), DartError("800", "시스템 점검"))
     assert await corp.corp_list(dart) == rows
     assert [r["corp_code"] for r in await corp.search_keyword(dart, "삼성")] == ["00126380"]
+
+
+async def test_corp_list_is_read_once_per_cache_and_parsed_from_zip(temp_cache, tmp_path):
+    xml = ("<result><list><corp_code>00126380</corp_code><corp_name> 삼성전자 </corp_name><corp_eng_name>SAMSUNG"
+           "</corp_eng_name><modify_date>20260101</modify_date><stock_code>005930</stock_code></list>"
+           "<list><corp_code>00000001</corp_code><corp_name>비상장</corp_name><stock_code> </stock_code></list></result>")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("CORPCODE.xml", xml)
+    dart = FakeDart(buf.getvalue())
+    rows = await corp.corp_list(dart)
+    assert rows == [{"corp_code": "00126380", "corp_name": "삼성전자", "corp_eng_name": "SAMSUNG",
+                     "modify_date": "20260101", "stock_code": "005930"},
+                    {"corp_code": "00000001", "corp_name": "비상장", "corp_eng_name": "", "modify_date": "",
+                     "stock_code": None}]
+    await temp_cache.delete("dart.corplist", "all")
+    assert await corp.corp_list(dart) is rows and dart.calls == 1        # 같은 캐시: SQLite를 다시 읽지 않는다
+    other = SQLiteCache(tmp_path / "other.sqlite")
+    set_cache(other)                                                     # 다른 캐시(다른 테스트·평가 러너)는 섞이지 않는다
+    try:
+        await other.set("dart.corplist", "all", rows[:1], ttl_s=60)
+        assert await corp.corp_list(dart) == rows[:1]
+    finally:
+        set_cache(temp_cache)
+        other.close()
