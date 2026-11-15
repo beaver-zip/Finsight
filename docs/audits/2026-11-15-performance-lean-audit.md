@@ -1,11 +1,11 @@
-# Finsight 성능·군더더기·가독성 감사
+# Finsight 성능·코드 정리·가독성 감사
 
 - 작성일: 2026-11-15
 - 대상: `beaver-zip/Finsight`, `main`, `ab2ba29`
 - 방법: `ponytail-audit`. 7개 영역(재무 계산, 보고서 생성, 외부 데이터 클라이언트, 법령 RAG, 채팅·뉴스, 프론트, 저장소 전체)을 영역별로 끝까지 읽고, 발견사항마다 별도 검증자가 코드를 다시 읽고 반박을 시도했다. 마지막에 누락 점검을 한 번 더 했다.
 - 가정한 부하: 한 사람이 로컬 uvicorn 서버 하나를 띄워 쓴다. 서버 안에서는 asyncio 작업과 LangGraph 분기가 병렬로 돈다.
 - 결과: 88개 발견, 반박으로 빠진 것 0개, 57개는 위치·심각도·수정 방법을 고쳐서 남김. 아래 본문은 그중 20개(관련 항목 묶음)다. 나머지는 [부록](#부록-본문에서-뺀-항목)에 있다.
-- 상태(2026-11-15): 본문 20개와 부록 41개 모두 **fixed**. 일부 하위 제안은 이유를 적고 남겼다(20번, 부록 표의 상태 열). 머지 뒤 리뷰 수정까지 백엔드 `267 passed, 1 deselected`, 프론트 `npm test` 9개 통과·`npm run build`·`npm run lint` 오류 0. 전/후 수치는 [성능 비교](../testing/2026-11-15-performance.md).
+- 상태(2026-11-15): 본문 20개와 부록 41개 모두 **fixed**. 일부 하위 제안은 이유를 적고 남겼다(20번, 부록 표의 상태 열). [2차 리뷰](#머지-뒤-2차-리뷰2026-11-15) 수정까지 백엔드 `289 passed, 1 deselected`, 프론트 `npm test` 10개 통과·`npm run build`·`npm run lint` 오류 0. 전/후 수치는 [성능 비교](../testing/2026-11-15-performance.md).
 - 이전 감사: [2026-11-11 감사](2026-11-11-refactoring-audit.md)에서 고친 11개는 다시 올리지 않았다.
 
 ## 무엇을 실행했고 무엇을 못 했나
@@ -157,7 +157,7 @@ Finsight는 공시·주가·뉴스를 모아 상장사 분석 리포트를 만�
     - **상태:** fixed. 타자 효과 제거 `092a2c9`, ChatContext·localStorage 제거 `1a571d2`, 렌더러 단순화와 v1 CSS 제거 `7a6c5b4`(링크 새 탭은 `render.py` `49fe5bc`), 엄격 tsconfig 합치기 `e138cd6`, CI lint `63616d4`, props·의존성 정리 `7c29425` + `bf8e772` + `f3df77b`, BASE_URL 한 곳 `053651d`. `npm run lint` 오류 1 → 0.
 
 20. **백엔드의 중복 경로와 죽은 코드** (`backends/app/api/report.py:L72-86, L129-169`, `backends/app/agents/company/analysis.py`, `backends/app/core/dart/*`, `backends/app/agents/company/render.py:L42-45, L623-626`, `backends/app/core/llm.py:L46-52`)
-    - **What this is:** 리포트 API, 계산 모듈, DART 파서 곳곳의 군더더기다.
+    - **What this is:** 리포트 API, 계산 모듈, DART 파서 곳곳의 중복과 쓰지 않는 코드다.
     - **Problem:** `/report/{code}/stream`은 `build_report`의 캐시·실행·결과 변환을 손으로 다시 만들었고, 프론트는 부르지 않는다. 지난 감사의 캐시 수정도 두 곳에 넣어야 했다. `analysis.py`에는 쓰기만 하고 읽지 않는 ctx 키 15곳이 있고, `Inputs`가 `Collected`의 필드 16개를 다시 적는다. 단위 정규식이 3번, 분기 키·날짜 파서가 2번씩 있고, `viewer.section`, `market.INDEX_SOURCES`, `NEWS_MODE`는 쓰는 곳이 없다. `render.sgn`·`_md`는 `fmt.signed`·`md`를 다시 만든 것이고, 회사명 정리와 기사 발췌 함수도 두 벌씩 있다. `langsmith`는 requirements에 있는데 없을 때의 대체 코드가 남아 있다.
     - **Fix:** 진행 표시가 필요 없으면 `report_stream`과 관련 테스트·README 줄을 지운다. 필요하면 진행 이벤트만 보내고 결과와 캐시는 `build_report`에 맡긴다. 나머지는 하나만 남기고 import해서 쓴다. `Inputs(Collected)` 상속은 `kw_only=True`가 있어야 깨지지 않는다.
     - **If we skip it:** 같은 규칙을 두 곳에서 고쳐야 하고, 1107줄 계산 파일에서 진짜 의존을 찾기 어렵다.
@@ -191,6 +191,37 @@ Finsight는 공시·주가·뉴스를 모아 상장사 분석 리포트를 만�
 | 채팅 뉴스 과업이 서버 로컬 날짜로 공시를 받아 리포트와 단일 실행 키가 다름 | fixed, `677b0da`. 테스트: `test_run_news_uses_kst_date_like_report` |
 | 재무 API가 정정 전 접수번호를 주면 신호 없이 옛 숫자를 캐시 | dismissed: 동작은 재현되지만 이번 변경 전에도 같았다(정정 전 숫자를 7일 캐시). 이번 수정(`9f1e6b5`)은 반복 재조회만 없앴다. `docs/testing/2026-11-11-financial-cache.md`에 한계로 적혀 있다 |
 | 실패한 교체가 남긴 `.pending`을 다음 적재가 집어감 | dismissed: `.pending`은 사용자가 마지막에 올린 파일이라 다시 적재해도 같은 이유로 실패하는 것이 맞다. 원본은 등록·검색·내려받기가 그대로 된다(9번 수정 방식) |
+
+## 머지 뒤 2차 리뷰(2026-11-15)
+
+1차 리뷰에서 시간이 없어 미뤘던 부분을 마저 했다. 1차 리뷰어가 냈지만 검증하지 않은 지적 16건(프론트, 분석·렌더, 캐시·법령·뉴스 전반)은 검증자 3명이 각각 직접 재현, 운영 경로 확인, 고칠 가치 판단의 관점으로 보고 2명 이상이 인정하면 확정했다. 1차 리뷰 수정 커밋 13개(`3f43920`~`677b0da`)는 리뷰어 3명이 새로 읽었고, 그 지적 9건도 같은 방식으로 검증했다. 확정 24건 중 13건을 고쳤고, 11건은 아래 이유로 고치지 않았으며, 1건은 기각됐다. 고친 묶음은 다른 리뷰어가 수정 전 코드에서 테스트가 실패하고 수정 뒤 통과하는 것을 다시 확인했고, 그 리뷰에서 나온 작은 지적 3건도 고쳤다. 고친 뒤 백엔드는 `289 passed, 1 deselected`, 프론트는 `npm test` 10개 통과다.
+
+| 지적 | 상태 |
+| --- | --- |
+| 뉴스 단일 실행을 기다리던 호출이 모두 취소돼도 유료 검색·요약이 끝까지 돈다 | fixed, `92ba20f` + `bc05683`. 기다리는 호출 수를 세어 0이 되면 실행을 `_running`에서 뺀 뒤 취소한다. 테스트: `test_cancelling_every_waiter_stops_shared_pipeline`, `test_caller_right_after_last_waiter_cancelled_gets_fresh_run` |
+| 요약 일부만 API 오류로 빠지면 기사 1~4건짜리 리포트가 오류 없이 7일 캐시 | fixed, `5479505`. `news: <예외>: 요약 API 오류로 기사 N/M건만 요약했다` 오류를 남겨 1시간 TTL이 된다. 채팅 뉴스는 이 필드를 쓰지 않는다. 테스트: `test_partial_summary_outage_marks_news_error_for_short_cache` |
+| 기사 제목이 `<article>` 밖에 그대로 들어가 닫는 태그 제거가 적용되지 않음 | fixed, `6791a83`. 제목을 본문과 함께 `<article>` 안에 넣고 같은 제거를 거친다. 테스트: `test_summarize_marks_article_body_as_data`(제목 주입) |
+| 그래프 테스트의 뉴스 결과에 `texts`가 없어 `get_news`가 테스트 안에서 조용히 실패 | fixed, `a252914`. 테스트가 `news:` 오류가 없고 `news_text`가 채워지는지 확인한다 |
+| 법령 하위 그래프 안의 실패(답변·확장·계획·판단)가 리포트 오류에 안 올라가 7일 캐시 | fixed, `c40b6ed`. 러너가 하위 그래프의 오류도 돌려주고 `regulatory_check`가 `regulatory: <예외>: …`로 옮긴다. 채팅 법령 과업은 그 값을 쓰지 않는다. 테스트: `test_report_legal_subgraph_failure_is_cached_briefly[answer, expand]` |
+| 피어 시세 조회 예외가 로그로만 남아 피어 비교가 빠진 리포트가 7일 캐시 | fixed, `55e3979`. `collect.peers: N개 시세 실패` 오류를 남긴다. 우선주 조회 실패 때 행에서 시세를 빼는 동작은 그대로다. 테스트: `test_peer_price_failure_is_partial` |
+| 줄 첫머리의 `제2조제3호에 따른`·`제1조ㆍ제2조`·`제2조 각 호`를 새 조문으로 자름 | fixed, `9cd8c6a` + `66d164a`. 참조 판단은 같은 줄에서만 한다. 테스트: `test_split_articles_keeps_line_start_reference_in_current_article`(6개 추가), `test_split_articles_splits_untitled_heading_before_particle_like_body`, `test_split_articles_keeps_titled_heading_whose_body_starts_next_line_with_reference` |
+| 법령 본문 조회(`lawService.do`)의 실패 응답을 200이라 7일 캐시 | fixed, `70b035d` + `c16f1e7`. 대상별 루트 요소가 없으면 캐시하지 않고, 예전 코드가 캐시한 실패 응답도 다시 받는다. 테스트: `test_failed_service_body_is_not_cached[law, admrul, lsDelegated]`, `test_failed_service_body_cached_by_old_code_is_refetched` |
+| `glob(case_sensitive=False)`가 Python 3.11에서 오류라 문서 목록이 500 | fixed, `1e39d90`. 확장자를 소문자로 비교한다. 테스트: `test_document_list_avoids_python_312_glob_option` |
+| 삭제를 두 번 누르면 두 번째 요청의 404로 실패 알림이 뜸 | fixed, `dc1c69a`. 프론트 `deleteDoc`이 404를 이미 지워진 것으로 본다. 테스트: `deleteDoc treats an already deleted file (404) as success` |
+| 적재 중에 업로드 창을 닫으면 적재가 끝나도 목록이 0청크로 남음 | fixed, `dd7f3db`. 적재가 끝나면 창이 닫혀 있어도 목록을 다시 읽는다. 자동 테스트는 없다(프론트 테스트에 DOM 환경이 없다) |
+| 예전 코드가 기한 없이 캐시한 빈 주식 수·배당 응답을 계속 씀 | fixed, `d3f974b`. 캐시 이름을 `dart.sh.v2`로 바꿨다. 테스트: `test_share_counts_ignores_legacy_permanent_empty_entry` |
+| 이 브랜치 전에 캐시된 리포트(틀린 재무 수치, 새 탭으로 안 열리는 링크)를 7일 동안 씀 | fixed, `eca9ec7`. 리포트 캐시 버전을 `v2.5`로 올렸다. 테스트: `test_legacy_cached_report_is_not_served` |
+| 공시 목록 노드가 시작 단계로 옮겨져 재무 수집이 공시 목록을 기다림 | dismissed: 차이는 DART 목록 호출 한 번(캐시되면 0)이고, 뉴스 쪽 경로는 오히려 짧아졌다. 고치려면 공시 재사용 구조를 되돌려야 한다 |
+| 병렬로 부른 판정·법령 호출 중 하나가 실패해도 나머지가 끝까지 돈다 | dismissed: 결과는 틀리지 않고, 실패하는 쪽은 재시도를 다 쓴 뒤라 나머지 호출은 대개 이미 끝나 있다 |
+| 최신 분기에 지배주주 순이익이 없으면 순이익 차트가 이전 분기를 씀 | dismissed: `9dadba0`에서 일부러 정해 테스트로 고정한 규칙이고, 축에 분기가 표시된다 |
+| 리랭커 예열 중에는 서버 종료가 예열이 끝날 때까지 늦음 | dismissed: 예열은 약 8초이고 문서의 실행 방법은 `--reload`를 쓰지 않는다 |
+| 대소문자·유니코드 정규화만 다른 파일명으로 다시 올리면 원본을 덮음(이름별 잠금도 같은 이유로 못 막음) | dismissed: `docs/testing/2026-11-11-remaining-fixes.md`에서 파일 시스템 제약으로 범위 밖에 둔 문제다. 이번 변경 전에도 같았다 |
+| 이름별 잠금이 요청한 이름마다 하나씩 남음 | dismissed: 로컬 서버 한 명 기준으로 이름 하나에 약 500바이트이고 재시작하면 비워진다 |
+| ASCII가 아닌 관리 토큰은 맞게 보내도 401 | dismissed: `db8aacb`에서 막히는 쪽으로 실패하게 정했다. 브라우저도 그런 헤더를 보내지 못한다 |
+| 라우터가 풀어 쓴 질문으로 답을 만들어 원래 질문의 형식 요청이 빠짐 | dismissed: 감사 12번에서 정한 수정이고 `849a614`의 남은 한계에 적혀 있다 |
+| 우선주 시세 조회가 실패하면 보통주 시세까지 빼서 피어 행이 빠짐 | dismissed: 보통주만으로 시가총액을 적게 잡는 것이 `4fd7f47`이 고친 문제다 |
+| 원문 재무제표가 계속 깨져 있으면 그 회사 리포트는 매시간 다시 만들어짐 | dismissed: 해석할 수 없는 문서는 오류 없이 빈 값이 되고, 남는 경우는 압축 파일 손상처럼 일시적인 것이다. `1b27582`이 테스트로 정한 분류다 |
+| 되묻기 체크포인트가 생성기가 끝날 때만 저장됨 | 기각: 검증자 3명 모두 재현하지 못했다 |
 
 ## 부록: 본문에서 뺀 항목
 
