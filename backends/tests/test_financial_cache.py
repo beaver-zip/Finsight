@@ -174,6 +174,26 @@ async def test_quarter_outage_keeps_other_quarters_and_is_reported(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_original_statements_are_fetched_concurrently_and_failures_skipped(monkeypatch):
+    import asyncio
+
+    reports = {(2023, "11013"): "r1", (2023, "11012"): "r2", (2023, "11014"): "r3"}
+    monkeypatch.setattr(history.original, "periodic_reports", AsyncMock(return_value=reports))
+    both = asyncio.Barrier(3)
+
+    async def statements(dart, rcept_no, reprt_code):
+        await asyncio.wait_for(both.wait(), 1)     # 차례로 받으면 시간 초과
+        if rcept_no == "r3":
+            raise RuntimeError("broken zip")
+        return rows(rcept_no), "OFS"
+
+    monkeypatch.setattr(history.original, "statements", statements)
+    out = await history.from_original(None, "corp", [(2023, 1), (2023, 2), (2023, 3), (2023, 4)], 12)
+    assert sorted(out) == [(2023, 1), (2023, 2)]
+    assert out[(2023, 2)].rcept_no == "r2" and out[(2023, 2)].fs_div == "OFS"
+
+
+@pytest.mark.asyncio
 async def test_cumulative_reuses_supplied_snapshots_without_external_calls(monkeypatch):
     dart = NS(json=AsyncMock(return_value={"list": rows()}))
     snap = await financials.get_snapshot(dart, "corp", 2024, "11013")

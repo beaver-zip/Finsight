@@ -111,21 +111,22 @@ async def from_original(dart: DartClient, corp_code: str, periods: list[tuple[in
     if not periods:
         return {}
     reports = await _reports(dart, corp_code, min(y for y, _ in periods), acc_mt)
-    out = {}
-    for y, q in periods:
-        rc = reports.get((y, RC[q]))
-        if rc is None:
-            continue
+
+    async def one(y: int, q: int, rc: str) -> FinancialSnapshot | None:
         try:
             rows, fs_div = await original.statements(dart, rc, RC[q])
         except Exception as e:  # noqa: BLE001
             log.info("원문 재무제표 실패 %s %s: %s", corp_code, rc, e)
-            continue
-        if rows:
-            out[(y, q)] = FinancialSnapshot(corp_code=corp_code, rcept_no=rc, bsns_year=y, reprt_code=RC[q],  # type: ignore[arg-type]
-                                            fs_div=fs_div, period_label=dart_fin.period_label(y, RC[q], acc_mt),  # type: ignore[arg-type]
-                                            lines=dart_fin.parse_lines(rows))
-    return out
+            return None
+        if not rows:
+            return None
+        return FinancialSnapshot(corp_code=corp_code, rcept_no=rc, bsns_year=y, reprt_code=RC[q],  # type: ignore[arg-type]
+                                 fs_div=fs_div, period_label=dart_fin.period_label(y, RC[q], acc_mt),  # type: ignore[arg-type]
+                                 lines=dart_fin.parse_lines(rows))
+
+    todo = [(y, q, reports[(y, RC[q])]) for y, q in periods if (y, RC[q]) in reports]
+    got = await asyncio.gather(*(one(*t) for t in todo))      # 동시 수는 DartClient 세마포어가 제한한다
+    return {(y, q): s for (y, q, _), s in zip(todo, got) if s is not None}
 
 
 async def quarterly_history(dart: DartClient, corp_code: str, last: tuple[int, int], *,
