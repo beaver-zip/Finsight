@@ -222,6 +222,7 @@ async def test_pipeline_researches_missing_aspects_and_fills_failed_summaries(mo
     assert res.texts == {n.id: f"{n.url.rsplit('/', 1)[1]} 본문 첫 문장입니다. " + "가" * 200 for n in res.items}
     assert not {f"https://x.kr/{u}" for u in fail} & {n.url for n in res.items} and len(summarized) == 7
     assert backup["peak"] == 2
+    assert res.errors == []                           # 백업으로 다 채웠으면 장애 표시를 남기지 않는다
 
 
 async def test_pipeline_raises_when_every_summary_hits_api_error(monkeypatch):
@@ -299,3 +300,59 @@ async def test_cancelling_every_waiter_stops_shared_pipeline(monkeypatch):
     for _ in range(5):
         await asyncio.sleep(0)
     assert only.cancelled() and searched == [] and not P._running
+
+
+async def test_partial_summary_outage_marks_news_error_for_short_cache(monkeypatch):
+    # 요약 도중 429가 시작돼 1건만 남으면 정상 완료와 구분되지 않아 리포트가 한 주 캐시됐다.
+    # 오류를 남겨 리포트 캐시가 1시간(_TRANSIENT)으로 줄게 한다
+    from unittest.mock import AsyncMock
+
+    import anthropic
+    import httpx
+
+    from app.agents.company import nodes
+    from app.agents.news import pipeline as P
+    from app.api.report import _TRANSIENT
+    from app.core.search.news import SearchHit
+    from app.domain.models import ArticleAnalysis, CorpProfile, QueryPlan
+
+    def hit(i):
+        return SearchHit(title=f"삼성전자 u{i}", url=f"https://x.kr/u{i}", snippet="s",
+                         raw_content=f"u{i} 본문 첫 문장입니다. " + "가" * 200,
+                         published_at=NOW - timedelta(days=1), published_raw=None, source="x", rank=i)
+
+    async def plans(corp, disc, groups, **k):
+        return [QueryPlan(aspect=P.ASPECT_GROUPS[g][0], query=f"q{g}", must_include=["삼성전자"]) for g in groups]
+
+    async def search(plans, time_range, http, q_offset=0):
+        return [(0, hit(i)) for i in range(12)]
+
+    async def emb(texts):
+        return np.eye(len(texts))
+
+    async def classify(name, cands, disc):
+        for c in cands:
+            c.relevance, c.aspect, c.materiality = 2, P.ASPECTS[int(c.id[1:]) % len(P.ASPECTS)], 2
+    calls = []
+
+    async def structured(model, messages, **k):
+        calls.append(1)
+        if len(calls) == 1:
+            u = messages[0]["content"].split("제목: 삼성전자 ", 1)[1].split("\n", 1)[0]
+            return ArticleAnalysis(summary=["a.", "b.", "c."], impact_direction="neutral", impact_horizon="short",
+                                   impact_channel="매출", evidence=f"{u} 본문 첫 문장입니다.")
+        raise anthropic.RateLimitError("429", body=None, response=httpx.Response(
+            429, request=httpx.Request("POST", "https://api.anthropic.com")))
+    monkeypatch.setattr(P, "plan_queries", plans)
+    monkeypatch.setattr(P, "_search_all", search)
+    monkeypatch.setattr(P, "embed", emb)
+    monkeypatch.setattr(P, "classify", classify)
+    monkeypatch.setattr(P.llm, "structured", structured)
+    res = await P.run_pipeline(CorpProfile(corp_code="1", corp_name="삼성전자"), [], http=None, now=NOW)
+    assert len(res.items) == 1 and len(calls) == 9
+    assert [e for e in res.errors if _TRANSIENT.match(e)] == res.errors != []
+
+    monkeypatch.setattr(nodes, "run_pipeline", AsyncMock(return_value=res))
+    out = await nodes.get_news({"corp": CorpProfile(corp_code="1", corp_name="삼성전자")},
+                               {"configurable": {"http": None}})
+    assert out["errors"] == res.errors and out["news"] == res.items

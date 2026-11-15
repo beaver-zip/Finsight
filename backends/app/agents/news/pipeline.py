@@ -45,6 +45,7 @@ class NewsResult:
     researched: bool
     n_initial: int = 0                   # 커버리지 재검색 전 후보 수(candidates[:n_initial]이 N1 후보)
     texts: dict[str, str] = field(default_factory=dict)     # 기사 id → 본문(검증 근거)
+    errors: list[str] = field(default_factory=list)         # API 오류로 요약이 모자랄 때 "news: 예외명: ..."
 
 
 # ---------- 1. 질의 계획 ----------
@@ -322,7 +323,8 @@ async def _run_pipeline(corp: CorpProfile, disclosures: list[Disclosure], *, htt
     analyses = await asyncio.gather(*(one(c) for c in picked))
     final: list[tuple[Candidate, ArticleAnalysis]] = [(c, a) for c, a in zip(picked, analyses) if a is not None]
     outage = bool(picked) and len(api_errors) == len(picked)     # 한 묶음이 모두 API 오류면 백업을 태우지 않는다
-    while not outage and (need := min(5, len(picked)) - len(final)) > 0 and backups:
+    target = min(5, len(picked))
+    while not outage and (need := target - len(final)) > 0 and backups:
         batch, backups = backups[:need], backups[need:]
         n_err = len(api_errors)
         got = await asyncio.gather(*(one(c) for c in batch))
@@ -330,6 +332,10 @@ async def _run_pipeline(corp: CorpProfile, disclosures: list[Disclosure], *, htt
         outage = len(api_errors) - n_err == len(batch)
     if not final and api_errors:                 # API 장애로 0건이면 '기사 없음'처럼 보이지 않게 오류를 올린다
         raise api_errors[-1]
+    errors = []
+    if api_errors and len(final) < target:       # 일부만 남아도 장애로 빠진 것이므로 리포트가 짧게 캐시되게 남긴다
+        e = api_errors[-1]
+        errors.append(f"news: {type(e).__name__}: 요약 API 오류로 기사 {len(final)}/{target}건만 요약했다: {e}")
 
     items = [NewsItem(id=f"n{i + 1}", title=c.title, url=c.url, source=domain_of(c.url), published_at=c.published_at,
                       aspect=c.aspect, materiality=c.materiality, score=round(c.score, 4),
@@ -339,4 +345,4 @@ async def _run_pipeline(corp: CorpProfile, disclosures: list[Disclosure], *, htt
         med = f"{cov.median_age_days:.0f}일" if cov.median_age_days is not None else "알 수 없음"
         note = f"커버리지 미달: 덮은 측면 {cov.aspects}개, 기사 나이 중앙값 {med}"
     return NewsResult(items=items, note=note, candidates=pool, researched=researched, n_initial=n_initial,
-                      texts={n.id: c.text for n, (c, _) in zip(items, final)})
+                      texts={n.id: c.text for n, (c, _) in zip(items, final)}, errors=errors)

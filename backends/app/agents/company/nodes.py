@@ -92,7 +92,7 @@ async def get_news(state: CompanyState, config: RunnableConfig) -> dict:
     deps = _deps(config)
     _progress("news.search", "측면별 질의 3개 검색 중")
     res = await run_pipeline(state["corp"], state.get("disclosures", []), http=deps["http"])
-    return {"news": res.items, "news_note": res.note, "news_text": res.texts}
+    return {"news": res.items, "news_note": res.note, "news_text": res.texts, "errors": res.errors}
 
 
 @guarded("analyze", {"data": None, "metrics": {}})
