@@ -19,6 +19,8 @@ from datetime import date
 from functools import lru_cache
 
 from app.domain.binding import substitute, tooltip
+from app.domain.fmt import md
+from app.domain.fmt import signed as sgn      # numf의 인자 이름 signed와 겹치지 않게
 from app.domain.models import Block, Headline, Metric, ReportDraft
 from app.settings import BACKEND_DIR
 
@@ -37,12 +39,6 @@ SECTION_NAMES = {"earnings": "실적", "valuation": "밸류에이션", "cash": "
 
 def esc(s: object) -> str:
     return html.escape(str(s), quote=True)
-
-
-def sgn(x: float, p: int = 1) -> str:
-    if round(x, p) == 0:
-        return f"{0:.{p}f}"
-    return ("+" if x > 0 else "") + f"{x:,.{p}f}"
 
 
 # ---------------- SVG 도구
@@ -621,9 +617,7 @@ class Text:
 
 
 def _md(d: str | None) -> str:
-    if not d:
-        return ""
-    return f"{int(d[5:7])}월 {int(d[8:10])}일"
+    return md(d) if d else ""
 
 
 def blocks_html(items: list[Block], tx: Text, cls: str = "blk") -> str:
