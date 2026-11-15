@@ -68,6 +68,15 @@ def test_split_articles_keeps_line_start_reference_in_current_article(ref):
     assert ref in arts["내규:2"].paragraphs[0].text
 
 
+@pytest.mark.parametrize("body", ["각 호의 뜻은 다음과 같다.", "제1호에 해당하는 자는 보고한다."])
+def test_split_articles_keeps_titled_heading_whose_body_starts_next_line_with_reference(body):
+    # 제목 있는 조 머리 다음 줄이 "각 호"·"제1호"로 시작해도 참조로 보지 않는다(참조는 같은 줄에서만 이어진다)
+    pages = [f"제1조(목적) 이 규정은 내부통제를 정한다.\n제2조(정의)\n{body}\n제3조(책임) 의장은 점검한다."]
+    arts = {a.key: a for a in uploads.split_articles("내규", pages)}
+    assert list(arts) == ["내규:1", "내규:2", "내규:3"] and arts["내규:2"].title == "정의"
+
+
+
 class FakeVectors:
     def __init__(self):
         self.chunks, self.deleted = [], []
