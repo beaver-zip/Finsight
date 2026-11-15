@@ -1,6 +1,7 @@
 """통계: 문항 단위 부트스트랩 95% 신뢰구간, 짝지은 차이의 부트스트랩, McNemar 정확 검정(양측), Cohen's κ."""
 from __future__ import annotations
 
+from math import comb
 from typing import Sequence
 
 import numpy as np
@@ -31,13 +32,12 @@ def paired_diff(a: dict[str, float | None], b: dict[str, float | None], n_boot: 
 
 def mcnemar(a: dict[str, bool | None], b: dict[str, bool | None]) -> dict:
     """이진 결과 쌍의 McNemar 정확 검정(양측). b01 = a 틀림·b 맞음, b10 = a 맞음·b 틀림."""
-    from scipy.stats import binomtest
-
     ids = [k for k in a if k in b and a[k] is not None and b[k] is not None]
     b01 = sum(1 for k in ids if not a[k] and b[k])
     b10 = sum(1 for k in ids if a[k] and not b[k])
     n = b01 + b10
-    p = 1.0 if n == 0 else float(binomtest(b01, n, 0.5, alternative="two-sided").pvalue)
+    # p=0.5 이항분포는 대칭이라 양측 정확 p값은 작은 쪽 꼬리의 두 배다
+    p = min(1.0, 2 * sum(comb(n, i) for i in range(min(b01, b10) + 1)) / 2**n)
     return {"b01": b01, "b10": b10, "p": p, "n": len(ids)}
 
 

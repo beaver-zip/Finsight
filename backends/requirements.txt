@@ -26,6 +26,8 @@ sentence-transformers
 pymupdf
 lxml
 numpy
+# 평가 설정(eval/common.py) 읽기
+pyyaml
 # 일별 종가·지수·분할 이력
 yfinance
 # 리포트 v2: 문서에 쓰인 글자만 잘라 Pretendard(woff2)를 내장
