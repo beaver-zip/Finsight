@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime
 from functools import wraps
@@ -258,5 +259,6 @@ async def assemble(state: CompanyState, config: RunnableConfig) -> dict:
     fs = None
     if col is not None and col.quarters:
         fs = col.quarters[-1].fs_div
-    html = render_report(data, draft, fs_div=fs, warning=warning)
+    # 폰트 서브셋이 CPU를 수 초 쓰므로 이벤트 루프 밖에서 그린다
+    html = await asyncio.to_thread(render_report, data, draft, fs_div=fs, warning=warning)
     return {"draft": draft, "html": html, "errors": errs}

@@ -41,8 +41,6 @@ def scenario(monkeypatch):
     profile = CorpProfile(corp_code="test", corp_name="테스트 기업")
     cache_key = report._cache_key
     monkeypatch.setattr(report, "_cache_key", AsyncMock(return_value=(profile, f"{report.VERSION}:test")))
-    # 폰트 서브셋 생성은 검증 정책과 무관하다.
-    monkeypatch.setattr("app.agents.company.render.font_faces", lambda _: "")
     st = NS(company_graph=build_company_graph(), dart=None, http=None, legal_runner=None)
     return NS(st=st, verify=verify, draft=draft, data=data, profile=profile, cache_key=cache_key)
 
