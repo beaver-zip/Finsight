@@ -46,10 +46,10 @@ def _to_report(out: dict, cost: float | None) -> CompanyReport:
 
 async def _cache_key(st: AppState, corp_code: str):
     profile = await dart_corp.get_profile(st.dart, corp_code)
-    filing = await dart_filings.latest_periodic(st.dart, profile)
+    today = datetime.now(KST).date()        # 그래프(get_filing)와 같은 KST 날짜
+    filing = await dart_filings.latest_periodic(st.dart, profile, today=today)
     prelim = "-"
     if filing is not None:
-        today = datetime.now(KST).date()
         try:
             fl = await prelim_filings(st.dart, corp_code, max(filing.rcept_dt, today - timedelta(days=120)), today)
             if fl:

@@ -91,8 +91,7 @@ async def get_disclosures(state: CompanyState, config: RunnableConfig) -> dict:
 async def get_news(state: CompanyState, config: RunnableConfig) -> dict:
     deps = _deps(config)
     _progress("news.search", "측면별 질의 3개 검색 중")
-    disclosures = await dart_filings.disclosures(deps["dart"], state["corp"].corp_code)  # 1시간 캐시
-    res = await run_pipeline(state["corp"], disclosures, http=deps["http"],
+    res = await run_pipeline(state["corp"], state.get("disclosures", []), http=deps["http"],
                              config=deps.get("news_config") or NewsConfig())
     texts = {}
     by_url = {c.url: c for c in res.candidates}
