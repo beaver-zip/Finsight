@@ -6,7 +6,6 @@ import logging
 from datetime import date
 
 log = logging.getLogger(__name__)
-INDEX_SOURCES = {"1001": {"name": "KOSPI", "yahoo": "^KS11"}, "2001": {"name": "KOSDAQ", "yahoo": "^KQ11"}}
 
 
 # ---------- 리포트 v2: 일별 종가 이력(yfinance, 분할 반영 종가) ----------

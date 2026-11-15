@@ -16,11 +16,13 @@ import httpx
 
 from app.core.dart import viewer
 from app.core.dart.client import DartClient
-from app.core.dart.filings import _list
+from app.core.dart.filings import _d, _list
+from app.core.dart.history import qkey
 
 log = logging.getLogger(__name__)
 UNITS = {"조원": Decimal(10) ** 12, "억원": Decimal(10) ** 8, "백만원": Decimal(10) ** 6, "천원": Decimal(10) ** 3,
          "원": Decimal(1)}
+_UNIT = re.compile(r"단위\s*:\s*(조원|억원|백만원|천원|원)")
 ROWS = {"revenue": ("매출액", "영업수익", "수익(매출액)", "매출"), "operating_income": ("영업이익",),
         "pretax_income": ("법인세비용차감전계속사업이익",), "net_income": ("당기순이익",),
         "net_income_owners": ("지배기업소유주지분순이익", "지배기업소유주지분당기순이익")}
@@ -67,7 +69,7 @@ class Prelim:
 
     @property
     def key(self) -> str:
-        return f"{self.q}Q{str(self.year)[2:]}"
+        return qkey(self.year, self.q)
 
 
 def _num(tok: str) -> Decimal | None:
@@ -92,9 +94,7 @@ async def prelim_filings(dart: DartClient, corp_code: str, since: date, until: d
     for r in rows:
         nm = r["report_nm"].strip()
         if "잠정" in nm and "실적" in nm:
-            d = r["rcept_dt"]
-            out.append(PrelimFiling(r["rcept_no"], date(int(d[:4]), int(d[4:6]), int(d[6:])), nm,
-                                    nm.startswith("[")))
+            out.append(PrelimFiling(r["rcept_no"], _d(r["rcept_dt"]), nm, nm.startswith("[")))
     out.sort(key=lambda f: (f.rcept_dt, f.rcept_no))
     return out
 
@@ -114,7 +114,7 @@ def first_per_quarter(filings: list[PrelimFiling]) -> list[PrelimFiling]:
 
 def parse_prelim(cells: list[str], filing: PrelimFiling) -> Prelim | None:
     joined = " ".join(cells)
-    mu = re.search(r"단위\s*:\s*(조원|억원|백만원|천원|원)", joined)
+    mu = _UNIT.search(joined)
     unit = mu.group(1) if mu else "원"
     k = UNITS[unit]
     # 실적기간: '당기실적' 뒤 첫 날짜 두 개

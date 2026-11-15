@@ -37,15 +37,18 @@ def decode(b: bytes) -> str:
     return b.decode("utf-8", "ignore")
 
 
+_SCRIPT = re.compile(r"<(script|style)[^>]*>.*?</\1>", re.S | re.I)
+
+
 def to_text(page: str) -> str:
-    s = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", page, flags=re.S | re.I)
+    s = _SCRIPT.sub(" ", page)
     s = re.sub(r"<[^>]+>", " ", s)
     return re.sub(r"\s+", " ", htmllib.unescape(s)).strip()
 
 
 def to_cells(page: str) -> list[str]:
     """표 셀·문단 경계를 살린 토큰 목록(빈 칸 제외)."""
-    s = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", page, flags=re.S | re.I)
+    s = _SCRIPT.sub(" ", page)
     s = re.sub(r"<[^>]+>", "\x00", s)
     toks = [re.sub(r"\s+", " ", htmllib.unescape(t)).strip() for t in s.split("\x00")]
     return [t for t in toks if t]
@@ -139,14 +142,6 @@ async def nodes(http: httpx.AsyncClient, rcept_no: str) -> list[Node]:
             out.append(Node("본문", f"{BASE}/report/viewer.do?rcpNo={rcp}&dcmNo={dcm}&eleId={ele}&offset={off}"
                             f"&length={ln}&dtd={dtd}"))
     return out
-
-
-async def section(http: httpx.AsyncClient, rcept_no: str, title_suffix: str) -> str | None:
-    """목차 제목이 title_suffix로 끝나는 첫 절의 HTML."""
-    for n in await nodes(http, rcept_no):
-        if n.title.replace(" ", "").endswith(title_suffix.replace(" ", "")):
-            return await fetch(http, n.url)
-    return None
 
 
 async def document(http: httpx.AsyncClient, rcept_no: str) -> str | None:

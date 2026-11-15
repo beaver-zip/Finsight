@@ -15,7 +15,7 @@ import httpx
 import lxml.html
 
 from app.core.dart import viewer
-from app.core.dart.prelim import UNITS, _num
+from app.core.dart.prelim import _UNIT, UNITS, _num
 
 log = logging.getLogger(__name__)
 HEADINGS = ("부문별요약재무", "부문별재무현황", "부문별요약재무현황", "사업부문별재무정보", "부문별재무정보")
@@ -42,7 +42,7 @@ def parse_segments(text: str) -> tuple[dict[str, dict[str, Decimal]], str] | Non
                 break
             cnt += 1
     body = text[start:]
-    mu = re.search(r"단위\s*:\s*(조원|억원|백만원|천원|원)", body[:600])
+    mu = _UNIT.search(body[:600])
     unit = mu.group(1) if mu else "억원"
     k = UNITS[unit]
     end = body.find("※", 40)
@@ -76,7 +76,6 @@ def parse_segments(text: str) -> tuple[dict[str, dict[str, Decimal]], str] | Non
 # --- 연결재무제표 주석 '영업부문에 대한 공시' 표 ---
 
 _PERIOD = re.compile(r"(당|전)\s*(기|분기|반기|\d\s*분기)")
-_UNIT = re.compile(r"단위\s*:\s*(조원|억원|백만원|천원|원)")
 # 열 머리말에서 부문 이름이 아닌 층(XBRL 차원 이름)
 _GENERIC = {"부문", "영업부문", "보고부문", "부문의합계", "기업전체", "기업전체총계", "3개월", "누적", "당기", "당분기",
             "당반기", "금액", "고객의유형", "고객의유형합계"}   # 고객의 유형 합계: 부문마다 외부·내부고객 칸 옆의 부문 합계
