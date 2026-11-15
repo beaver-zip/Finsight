@@ -105,19 +105,23 @@ async def _reports(dart: DartClient, corp_code: str, first_year: int, acc_mt: in
         return {}
 
 
-async def from_original(dart: DartClient, corp_code: str, periods: list[tuple[int, int]],
-                        acc_mt: int | None) -> dict[tuple[int, int], FinancialSnapshot]:
-    """재무 API에 없는 분기를 정기보고서 원문 재무제표에서 읽는다(원문이 없는 분기는 건너뛴다)."""
+async def from_original(dart: DartClient, corp_code: str, periods: list[tuple[int, int]], acc_mt: int | None
+                        ) -> tuple[dict[tuple[int, int], FinancialSnapshot], dict[tuple[int, int], Exception]]:
+    """재무 API에 없는 분기를 정기보고서 원문 재무제표에서 읽는다(원문이 없는 분기는 건너뛴다).
+    (채운 분기, 장애로 못 채운 분기 → 예외)."""
     if not periods:
-        return {}
-    reports = await _reports(dart, corp_code, min(y for y, _ in periods), acc_mt)
+        return {}, {}
+    try:
+        reports = await original.periodic_reports(dart, corp_code, min(y for y, _ in periods), acc_mt)
+    except Exception as e:  # noqa: BLE001
+        return {}, {p: e for p in periods}          # 목록 장애: 어느 분기에 원문이 있는지 모른다
 
-    async def one(y: int, q: int, rc: str) -> FinancialSnapshot | None:
+    async def one(y: int, q: int, rc: str) -> FinancialSnapshot | Exception | None:
         try:
             rows, fs_div = await original.statements(dart, rc, RC[q])
         except Exception as e:  # noqa: BLE001
             log.info("원문 재무제표 실패 %s %s: %s", corp_code, rc, e)
-            return None
+            return e
         if not rows:
             return None
         return FinancialSnapshot(corp_code=corp_code, rcept_no=rc, bsns_year=y, reprt_code=RC[q],  # type: ignore[arg-type]
@@ -126,7 +130,8 @@ async def from_original(dart: DartClient, corp_code: str, periods: list[tuple[in
 
     todo = [(y, q, reports[(y, RC[q])]) for y, q in periods if (y, RC[q]) in reports]
     got = await asyncio.gather(*(one(*t) for t in todo))      # 동시 수는 DartClient 세마포어가 제한한다
-    return {(y, q): s for (y, q, _), s in zip(todo, got) if s is not None}
+    return ({(y, q): s for (y, q, _), s in zip(todo, got) if isinstance(s, FinancialSnapshot)},
+            {(y, q): s for (y, q, _), s in zip(todo, got) if isinstance(s, Exception)})
 
 
 async def quarterly_history(dart: DartClient, corp_code: str, last: tuple[int, int], *,
@@ -140,12 +145,15 @@ async def quarterly_history(dart: DartClient, corp_code: str, last: tuple[int, i
     got = await asyncio.gather(*(_snap(dart, corp_code, y, q, acc_mt, expected_rcept_no=reports.get((y, RC[q])))
                                  for y, q in periods), return_exceptions=True)
     snaps = {p: s for p, s in zip(periods, got) if isinstance(s, FinancialSnapshot)}
+    failed = {p: e for p, e in zip(periods, got) if isinstance(e, Exception)}
     if use_original:
         recent = set(periods[-ORIGINAL_QUARTERS:])
-        snaps.update(await from_original(dart, corp_code, [p for p in periods if p in recent and p not in snaps], acc_mt))
+        filled, orig_failed = await from_original(
+            dart, corp_code, [p for p in periods if p in recent and p not in snaps], acc_mt)
+        snaps.update(filled)
+        failed.update(orig_failed)
     # 한 분기 장애는 그 분기만 비우고, 원문으로도 못 채웠으면 '데이터 없음'과 구분되게 errors로 올린다
-    errors = [f"{qkey(*p)}: {type(e).__name__}: {e}" for p, e in zip(periods, got)
-              if isinstance(e, Exception) and p not in snaps]
+    errors = [f"{qkey(*p)}: {type(e).__name__}: {e}" for p, e in sorted(failed.items()) if p not in snaps]
     for e in errors:
         log.warning("스냅샷 실패 %s %s", corp_code, e)
     rows = []

@@ -14,7 +14,7 @@ from functools import lru_cache
 
 from app.core.dart import financials as dart_fin
 from app.core.dart.client import DartClient
-from app.core.dart.history import RC, cum_value, value
+from app.core.dart.history import FIRST_YEAR, RC, _reports, cum_value, value
 from app.core.dart.shares import share_counts
 from app.core.market import daily_close, pref_candidates, ticker_for
 from app.domain.accounts import industry_group
@@ -87,14 +87,19 @@ async def pref_price(stock_code: str, corp_cls: str | None) -> float | None:
 
 
 async def metrics_for(dart: DartClient, corp_code: str, stock_code: str, corp_cls: str | None, name: str,
-                      year: int, q: int, *, is_self: bool = False, induty_code: str | None = None) -> PeerRow | None:
-    """(year, q) 보고서 기준 지표. 4분기면 사업연도 값, 아니면 최근 4개 분기(전년 연간 + 당해 누적 − 전년 동기 누적)."""
+                      year: int, q: int, *, is_self: bool = False, induty_code: str | None = None,
+                      reports: dict | None = None) -> PeerRow | None:
+    """(year, q) 보고서 기준 지표. 4분기면 사업연도 값, 아니면 최근 4개 분기(전년 연간 + 당해 누적 − 전년 동기 누적).
+    reports((연도, 보고서코드) → 최종 접수번호)를 주면 스냅샷을 history와 같은 키로 읽는다."""
+    exp = reports or {}
     try:
-        cur = await dart_fin.get_snapshot(dart, corp_code, year, RC[q])
+        cur = await dart_fin.get_snapshot(dart, corp_code, year, RC[q], expected_rcept_no=exp.get((year, RC[q])))
         if cur is None:
             return None
-        fy_prev = await dart_fin.get_snapshot(dart, corp_code, year - 1, "11011")
-        same_prev = None if q == 4 else await dart_fin.get_snapshot(dart, corp_code, year - 1, RC[q])
+        fy_prev = await dart_fin.get_snapshot(dart, corp_code, year - 1, "11011",
+                                              expected_rcept_no=exp.get((year - 1, "11011")))
+        same_prev = None if q == 4 else await dart_fin.get_snapshot(
+            dart, corp_code, year - 1, RC[q], expected_rcept_no=exp.get((year - 1, RC[q])))
         sh = await share_counts(dart, corp_code, year, RC[q]) or await share_counts(dart, corp_code, year - 1, "11011")
     except Exception as e:  # noqa: BLE001
         log.info("피어 지표 실패 %s: %s", name, e)
@@ -110,8 +115,12 @@ async def metrics_for(dart: DartClient, corp_code: str, stock_code: str, corp_cl
     eq_prev_src = fy_prev if q == 4 else same_prev
     eq0 = (_f(value(eq_prev_src, "equity_owners")) or _f(value(eq_prev_src, "total_equity"))) if eq_prev_src else None
     eq_avg = (eq + eq0) / 2 if eq is not None and eq0 is not None else eq
-    price = await last_close(ticker_for(stock_code, corp_cls))
-    pref_px = await pref_price(stock_code, corp_cls) if sh and sh.pref_out else None
+    try:
+        price = await last_close(ticker_for(stock_code, corp_cls))
+        pref_px = await pref_price(stock_code, corp_cls) if sh and sh.pref_out else None
+    except Exception as e:  # noqa: BLE001
+        log.info("피어 시세 실패 %s: %s", name, e)       # 시세 없이 재무 지표만 남긴다
+        price = pref_px = None
     total = sh.total_out if sh else None
     # shortcut: 최근 정기보고서 뒤 분할·병합한 피어는 주식 수가 시세와 기준이 달라 시가총액·PBR·PER이 틀린다.
     # 대상 회사 자기 행은 analysis._peers가 맞춘다. 다른 피어는 분할 이력을 불러야 하므로 사례가 생기면 넣는다.
@@ -136,8 +145,10 @@ async def metrics_for(dart: DartClient, corp_code: str, stock_code: str, corp_cl
 async def peer_rows(dart: DartClient, corp: CorpProfile, year: int, q: int, n: int = 6) -> list[PeerRow]:
     """같은 중분류에서 시가총액 순으로 n개. 지주회사(64992)처럼 한 코드에 금융지주와 일반 지주가 섞이므로
     대상 회사와 금융 세트 판정이 다른 후보는 빼고 다음 후보로 채운다(후보는 최대 3n개까지 본다)."""
+    # 대상 회사는 history와 같은 기대 접수번호로 읽어 스냅샷을 나눠 쓰고, 정정 뒤 옛 숫자가 남지 않게 한다
+    reports = await _reports(dart, corp.corp_code, FIRST_YEAR, corp.acc_mt)
     me = await metrics_for(dart, corp.corp_code, corp.stock_code or "", corp.corp_cls, corp.corp_name, year, q,
-                           is_self=True, induty_code=corp.induty_code)
+                           is_self=True, induty_code=corp.induty_code, reports=reports)
     group = me.group if me else "general"
     cands = peer_candidates(corp, n * 3)
     rows = [me] if me else []

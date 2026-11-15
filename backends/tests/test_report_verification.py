@@ -14,6 +14,8 @@ from app.core import budget
 from app.deps import get_state
 from app.domain.models import Block, CorpProfile, Headline, ReportDraft, VerificationIssue, VerificationResult
 
+REAL_REGULATORY = nodes.regulatory_check
+
 
 @pytest.fixture
 def scenario(monkeypatch):
@@ -187,6 +189,36 @@ async def test_report_with_collect_failure_is_cached_briefly(scenario, monkeypat
     now += 2
     await report.build_report(scenario.st, "test")
     assert scenario.verify.await_count == 2
+
+
+def _report_ttl(cache) -> float:
+    return cache._run("SELECT expires_at - created_at FROM kv WHERE namespace='report'")[0][0]
+
+
+@pytest.mark.parametrize("node,name", [("get_news", "news"), ("get_disclosures", "disclosures"),
+                                       ("regulatory_check", "regulatory")])
+@pytest.mark.asyncio
+async def test_report_missing_failed_branch_is_cached_briefly(scenario, monkeypatch, temp_cache, node, name):
+    import httpx
+
+    async def outage(state, config):
+        raise httpx.ConnectTimeout("down")
+
+    monkeypatch.setattr(nodes, node, nodes.guarded(name, {})(outage))
+    scenario.st.company_graph = build_company_graph()
+    out = await report.build_report(scenario.st, "test")
+    assert out["json"]["errors"] == [f"{name}: ConnectTimeout: down"]
+    assert _report_ttl(temp_cache) == pytest.approx(report.HOUR)
+
+
+@pytest.mark.asyncio
+async def test_report_without_legal_runner_keeps_week_cache(scenario, monkeypatch, temp_cache):
+    monkeypatch.setattr(nodes, "regulatory_check", REAL_REGULATORY)
+    monkeypatch.setattr(nodes, "triggers", lambda state: ["financial"])
+    scenario.st.company_graph = build_company_graph()
+    out = await report.build_report(scenario.st, "test")
+    assert out["json"]["errors"][0].startswith("regulatory: 법령 서브그래프가 연결되지 않아")
+    assert _report_ttl(temp_cache) == pytest.approx(report.WEEK)      # 설정 문제는 1시간 뒤에도 그대로다
 
 
 def test_style_only_issues_keep_text_without_warning_and_are_cached(scenario):

@@ -475,6 +475,20 @@ async def test_dart_cached_uses_stale_value_when_dart_fails(temp_cache):
         await cached("ns", "missing", 60, boom)
 
 
+async def test_startup_purge_keeps_recent_stale_fallback(temp_cache):
+    from app.core.dart.client import DartError, cached
+
+    async def boom():
+        raise DartError("800", "시스템 점검")
+
+    await temp_cache.set("px", "old", [1], ttl_s=-8 * 86_400)          # 8일 전에 만료: 지운다
+    await temp_cache.set("dart.list", "recent", [2], ttl_s=-86_400)    # 어제 만료: 점검 대비로 남긴다
+    await temp_cache.set("ns", "forever", [3])
+    assert await temp_cache.purge_expired() == 1
+    assert temp_cache._run("SELECT key FROM kv ORDER BY key") == [("forever",), ("recent",)]
+    assert await cached("dart.list", "recent", 60, boom) == [2]
+
+
 def _redirect_to_error_page(req):
     if req.url.path.endswith("error.html"):
         return httpx.Response(200, text="<html>" + "점검 중" * 100 + "</html>")

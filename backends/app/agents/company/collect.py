@@ -103,8 +103,8 @@ async def collect(dart: DartClient, http: httpx.AsyncClient, corp: CorpProfile, 
     out.quarters, out.px, out.index_px, out.splits, out.prelim, out.buybacks, out.peers = \
         hist.quarters, px, ix, sp, prelim, bb, peers
     out.prelim_firsts = first_per_quarter(pfl)
-    if tk and not px:       # daily_close는 실패하면 스스로 []를 돌려준다
-        err.append("collect.price: 시세 없음")
+    # 종목 시세가 빈 것은 '데이터 없음'(코넥스·거래정지)이고 장애는 _safe가 남긴다.
+    # 지수는 늘 시세가 있으므로 비면 yfinance가 오류를 숨긴 장애로 본다
     if tk and not ix:
         err.append("collect.index: 시세 없음")
     if hist.errors:
