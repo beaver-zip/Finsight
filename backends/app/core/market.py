@@ -38,7 +38,7 @@ def _yf_splits(ticker: str) -> list[list]:
 
 
 async def daily_close(ticker: str, start: date) -> list[tuple[date, float]]:
-    """start 이후 일별 종가. 12시간 캐시."""
+    """start 이후 일별 종가. 12시간 캐시(빈 결과는 1시간: 없는 우선주 후보를 리포트마다 다시 묻지 않는다)."""
     from app.core.cache import get_cache, make_key
 
     cache = get_cache()
@@ -50,8 +50,7 @@ async def daily_close(ticker: str, start: date) -> list[tuple[date, float]]:
         except Exception as e:  # noqa: BLE001
             log.warning("시세 실패 %s: %s", ticker, e)
             hit = []
-        if hit:
-            await cache.set("px", key, hit, ttl_s=PX_TTL)
+        await cache.set("px", key, hit, ttl_s=PX_TTL if hit else 3600)
     return [(date.fromisoformat(d), v) for d, v in hit]
 
 
@@ -71,6 +70,6 @@ async def splits(ticker: str) -> list[tuple[date, float]]:
 
 
 def pref_candidates(stock_code: str) -> list[str]:
-    """보통주 코드의 끝자리를 바꾼 우선주 후보(예: 005930 → 005935)."""
+    """보통주 코드의 끝자리를 바꾼 우선주 후보(예: 005930 → 005935, 신형 028260 → 02826K)."""
     base = stock_code[:-1]
-    return [base + d for d in ("5", "7", "9")]
+    return [base + d for d in ("5", "7", "9", "K")]
