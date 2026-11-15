@@ -1,6 +1,6 @@
 """법령 코퍼스: 적재 대상 4개 문서의 수집과 저장본(data/law/corpus.json) 읽기.
 
-저장본은 조문·별표 조회(get_article, get_annex)에 쓴다. Weaviate·Neo4j 없이도 조문 본문을 꺼낼 수 있다.
+저장본은 조문·별표 조회(Corpus.get)에 쓴다. Weaviate·Neo4j 없이도 조문 본문을 꺼낼 수 있다.
 """
 from __future__ import annotations
 

@@ -31,15 +31,15 @@ async def test_existing_tools_follow_reingest_and_keep_old_data_on_fetch_error(t
     monkeypatch.setattr(ingest, "fetch_all", AsyncMock(return_value=[document("new", 2)]))
     try:
         t = await tools.LawTools.open()
-        assert t.get_article("법령:1").paragraphs[0].text == "old"
+        assert t.corpus.get("법령:1").paragraphs[0].text == "old"
         await ingest.ingest(graph=False, vectors=False)
-        assert t.get_article("법령:1").paragraphs[0].text == "new"
-        assert t.get_article("법령:2").paragraphs[0].text == "new"
+        assert t.corpus.get("법령:1").paragraphs[0].text == "new"
+        assert t.corpus.get("법령:2").paragraphs[0].text == "new"
         assert (await t.search_law("법령"))[0].article.key == "법령:2"
         assert (await t.expand_citations("법령", ["법령:1"]))[0].article.key == "법령:2"
         monkeypatch.setattr(ingest, "fetch_all", AsyncMock(side_effect=RuntimeError("fetch failed")))
         with pytest.raises(RuntimeError, match="fetch failed"):
             await ingest.ingest(graph=False, vectors=False)
-        assert t.get_article("법령:1").paragraphs[0].text == "new"
+        assert t.corpus.get("법령:1").paragraphs[0].text == "new"
     finally:
         corpus.load_corpus.cache_clear()
