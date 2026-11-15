@@ -5,7 +5,7 @@
 - 방법: `ponytail-audit`. 7개 영역(재무 계산, 보고서 생성, 외부 데이터 클라이언트, 법령 RAG, 채팅·뉴스, 프론트, 저장소 전체)을 영역별로 끝까지 읽고, 발견사항마다 별도 검증자가 코드를 다시 읽고 반박을 시도했다. 마지막에 누락 점검을 한 번 더 했다.
 - 가정한 부하: 한 사람이 로컬 uvicorn 서버 하나를 띄워 쓴다. 서버 안에서는 asyncio 작업과 LangGraph 분기가 병렬로 돈다.
 - 결과: 88개 발견, 반박으로 빠진 것 0개, 57개는 위치·심각도·수정 방법을 고쳐서 남김. 아래 본문은 그중 20개(관련 항목 묶음)다. 나머지는 [부록](#부록-본문에서-뺀-항목)에 있다.
-- 상태: 모두 **open**. 코드는 바꾸지 않았다.
+- 상태: 1·2·3·4·6번 **fixed**(2026-11-15, 아래 각 항목의 상태 줄). 나머지는 **open**. 수정 뒤 백엔드 `189 passed, 1 deselected`.
 - 이전 감사: [2026-11-11 감사](2026-11-11-refactoring-audit.md)에서 고친 11개는 다시 올리지 않았다.
 
 ## 무엇을 실행했고 무엇을 못 했나
@@ -24,24 +24,28 @@ Finsight는 공시·주가·뉴스를 모아 상장사 분석 리포트를 만�
    - **Problem:** TTM은 `sum(f(...) or 0 ...)`로 빈 분기를 0으로 더한다. 한 분기 순이익이 없으면 PER이 71.6배에서 97.7배로 바뀌고(직접 실행), 모두 없으면 사실표에 `0원`, ROE `0.0%`가 들어간다. 같은 파일의 `_valuation`은 4개가 다 있어야 더해서 두 규칙이 다르다. 연간 증감률은 중간 사업보고서가 없으면 2년 전과 비교하면서 라벨은 "2024년 → 2025년"이라고 쓴다. 잠정실적에 매출이 없고 컨센서스에 매출이 있으면 `None / float` TypeError로 최근 분기 표가 통째로 빠진다.
    - **Fix:** 연속된 4개 분기 key(`prev_quarter`)로 찾아 하나라도 없으면 `None`을 주는 작은 함수 하나를 만들어 두 곳이 같이 쓴다. 증감률은 `heads[-2] == str(y - 1)`일 때만 넣는다. 컨센서스 비교는 `rev is not None`일 때만 나눈다. 세 경우를 `test_report_v2.py`에 회귀 테스트로 넣는다(지금 TTM·PER·ROE 숫자를 확인하는 테스트가 없다).
    - **If we skip it:** 계정 이름 하나를 못 찾은 분기만 있어도 PER·ROE·EPS가 틀린 채 리포트에 나간다.
+   - **상태:** fixed, `0d5486e`. 밸류에이션 밴드와 같은 `_ttm` 규칙(연속 4개 분기가 모두 있을 때만)으로 통일했다. 테스트: `test_ttm_sums_four_consecutive_quarters`, `test_ttm_with_missing_quarter_is_dropped_not_zero`, `test_annual_growth_needs_the_previous_year`, `test_prelim_without_revenue_keeps_latest_table`(새 테스트 4개는 수정 전 코드에서 실패 확인).
 
 2. **액면분할 뒤 시가총액·연도별 PER이 분할 비율만큼 틀린다** (`backends/app/agents/company/analysis.py:L242-244, L482-494, L952-956`)
    - **What this is:** 주가는 yfinance에서 분할이 반영된 값으로 받고, 주식 수는 공시에서 받는다.
    - **Problem:** `_shares_at`만 `_split_factor`로 주식 수를 맞춘다. 시가총액, 연도별 EPS·DPS, 발행주식 증감 비교는 분할 전 주식 수를 그대로 쓴다. 분기말 뒤 5:1 분할 입력으로 돌리면 시가총액이 9.0조원에서 1.8조원, 연도별 PER이 40.6에서 8.1이 된다. 같은 표의 TTM PER 71.6배는 그대로라 한 표 안에서 숫자가 안 맞는다. 10:1 병합은 "발행주식 90.0% 감소", 즉 소각처럼 보인다.
    - **Fix:** 세 곳에 이미 있는 `_split_factor`를 곱하거나 나눈다. 분할 입력 테스트 하나를 더한다. 피어 표(`core/peers.py:L114-125`)는 피어마다 분할 이력을 불러야 하므로 따로 하거나 `shortcut:` 주석으로 한계를 적는다.
    - **If we skip it:** 분할한 회사는 대표 숫자인 시가총액이 몇 배 틀린다.
+   - **상태:** fixed, `36bc298` + `c6ebc8a`. 리뷰에서 분기말 28일 가정, 사업보고서 제출 전 분할의 EPS 이중 보정, 피어 표 자기 행 누락을 찾아 두 번째 커밋에서 고쳤다. 테스트: `test_split_keeps_per_share_values`(분할 시점 5가지). 한계: 다른 피어 행은 분할 이력이 없어 `core/peers.py`에 `shortcut:` 주석으로 남겼다. EPS 기준(배당 공시 접수일)은 K-IFRS 1033 소급 규칙에 기댄 것이라 실제 DART 응답으로는 확인하지 않았다.
 
 3. **OpenDART 점검 응답(302)을 따라가서 예비 캐시가 안 돈다** (`backends/app/main.py:L35`, `backends/app/core/dart/client.py:L41-68, L91-108`)
    - **What this is:** DART 클라이언트는 3xx를 실패로 보고, 실패하면 만료된 캐시라도 쓰게 되어 있다.
    - **Problem:** 공유 `httpx.AsyncClient(follow_redirects=True)`가 302를 점검 HTML 페이지까지 따라가 200을 받는다. 그러면 `r.json()`에서 `JSONDecodeError`가 난다. `DartError`가 아니라서 예비 캐시 분기를 건너뛰고, 리포트 API는 502 대신 500을 준다. MockTransport로 재현했다. 기존 테스트는 `DartError("302")`를 직접 던지는 대역이라 이 경로를 못 잡는다.
    - **Fix:** `DartClient._get`의 `http.get(...)`에 `follow_redirects=False` 하나를 넣는다. 뷰어(`viewer.py`)는 `r.history`가 있으면 실패로 보고 캐시하지 않는다. 302 → `DartError` 테스트 하나를 둔다.
    - **If we skip it:** DART 점검 시간에는 어제 캐시가 있어도 기업 검색과 리포트가 500으로 실패한다. 뷰어 원문 자리에 점검 페이지가 영구 캐시될 수 있다.
+   - **상태:** fixed, `84298cb` + `a129abe`. DART API·뷰어 요청만 리다이렉트를 끈다(평소 응답은 200, 리다이렉트 없음을 공개 URL로 확인). 두 번째 커밋은 오류 문구의 Location에서 질의를 빼 인증키 노출을 막는다. 테스트: `test_dart_redirect_is_dart_error_even_on_redirect_following_client`, `test_dart_viewer_redirect_is_not_cached`. 실제 점검 응답은 확인하지 못했다.
 
 4. **원문 재무제표 파서가 `△` 음수를 못 읽는다** (`backends/app/core/dart/original.py:L30-43`)
    - **What this is:** 재무 API가 데이터 없음(013)을 줄 때 공시 원문 표에서 숫자를 읽는 대체 경로다.
    - **Problem:** `_AMT` 정규식이 `△`를 허용하지 않아 `△1,234`가 `None`이 된다. 그 줄은 건너뛰어 영업손실이 빈칸이 된다. 이 결과는 `dart.orig` 캐시에 만료 없이 남는다. `prelim._num`, `segments._amount`는 `△`를 읽어서 규칙이 서로 다르다.
    - **Fix:** 첫 줄을 `t = tok.replace(" ", "").replace("△", "-")`로 바꾸고, 캐시를 다시 읽도록 `VERSION`을 3으로 올린다. `test_original.py`에 `△` 줄 하나를 더한다.
    - **If we skip it:** 적자 분기의 손실이 리포트에서 사라진다.
+   - **상태:** fixed, `d7b56b7`. 테스트: `test_triangle_negative_amounts`.
 
 5. **내규 PDF에서 줄 첫머리의 "제N조에 따른"을 새 조문으로 자른다** (`backends/app/core/law/uploads.py:L25, L83-112`)
    - **What this is:** 올린 내규 PDF 본문을 조문 단위로 잘라 검색 인덱스에 넣는다.
@@ -54,6 +58,7 @@ Finsight는 공시·주가·뉴스를 모아 상장사 분석 리포트를 만�
    - **Problem:** 두 쪽 모두 기사 ID를 `n1`~`n5`로 붙인다. 회사 리포트 기사(최대 7일 캐시)와 새 뉴스 기사는 거의 항상 달라서, 서로 다른 기사가 같은 `[n1]`이 된다. 근거 병합은 뒤의 값으로 덮어쓴다. 그래서 출처 링크가 다른 기사로 가고, 검증기는 다른 기사 본문으로 주장을 판정한다. 리포트 캐시가 없으면 같은 회사 뉴스 수집·분류·요약이 동시에 두 번 돌아 Tavily 크레딧과 LLM 비용도 두 배다.
    - **Fix:** news 과업이 같이 있으면 company 쪽은 `rep.news`를 비우고 쓴다. `Send` payload에 `skip_news`를 넣는 정도로 된다. 캐시가 없을 때 리포트 그래프의 `get_news`까지 건너뛰려면 같은 플래그를 `build_report`에 넘긴다. company+news 테스트 하나로 최종 출처에 `n1`이 한 번만 나오는지 본다.
    - **If we skip it:** 복합 질문 답의 출처가 틀리게 붙거나 맞는 주장이 검증에서 떨어지고, 뉴스 비용이 두 번 나간다.
+   - **상태:** ID 충돌은 fixed, `7a5d088` + `cdfce90`. 첫 커밋(리포트 기사 빼기)은 리포트 본문의 `[n1]` 표기가 남고 뉴스 실패 때 기사가 사라져서, 두 번째 커밋에서 리포트 기사 id를 목록·본문·news_ids에서 함께 n101~로 옮기는 방식으로 바꿨다. 테스트: `test_company_and_news_do_not_share_article_ids`(뉴스 성공·실패). **뉴스 이중 실행은 open:** 리포트 캐시가 없으면 리포트 생성 안의 뉴스 수집이 채팅 뉴스 과업과 따로 한 번 더 돈다. 리포트에 기사가 필요하고 캐시되는 결과물이라 이번에는 바꾸지 않았다.
 
 ## Should fix
 
