@@ -7,8 +7,8 @@ import { ChatForm } from "../components/ChatForm";
 import { Modal } from "../components/steps/Modal";
 import { useCollectionFiles } from "../hooks/useCollectionFiles";
 import { Bubble } from "../components/Bubble";
+import type { Message } from "../components/Bubble";
 import { LoadingSpinner } from "../components/LoadingSpinner";
-import type { Message } from "../ChatContext";
 import { useChatStream } from "../hooks/useChatStream";
 import type { QueryMode } from "../hooks/useChatStream";
 

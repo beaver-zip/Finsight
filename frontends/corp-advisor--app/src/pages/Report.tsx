@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { useChat } from "../ChatContext.tsx";
 import { useCorpData } from "../hooks/useCorpData.ts";
 import { Table } from "../components/Table.tsx";
 import { SendHorizonal, ChevronLeft, Printer, RotateCcw } from "lucide-react";
@@ -97,14 +96,6 @@ const HtmlWithScriptsRenderer = ({ htmlString }: { htmlString: string }) => {
   return <div ref={containerRef} className={isV2 ? "w-full" : "report-body w-full"} />;
 };
 
-// 메시지 타입 정의
-type Message = {
-  id: number;
-  type: "question" | "answer" | "loading";
-  text: string | React.ReactNode;
-  isStreaming?: boolean;
-};
-
 /** 보고서 HTML에서 제목(h1)을 뽑아 상단 바에 표시한다. */
 function extractReportTitle(html: string): string {
   const match = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
@@ -118,14 +109,9 @@ function Report() {
   const [searchTerm, setSearchTerm] = useState(""); // 입력 폼 값
   const [submittedTerm, setSubmittedTerm] = useState(""); // fetch에 사용
   const [tableSearch, setTableSearch] = useState(""); // 테이블 내부 검색
-  const [reportStatus, setReportStatus] = useState<
-    "idle" | "success" | "error"
-  >("idle");
+  const [reportHtml, setReportHtml] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
-  const { messages, setMessages } = useChat();
-  const chatEndRef = useRef<null | HTMLDivElement>(null);
 
   const {
     data: corpData,
@@ -140,9 +126,7 @@ function Report() {
   };
 
   const handleNewReport = () => {
-    setMessages([]);
-    localStorage.removeItem("chatMessages");
-    setReportStatus("idle");
+    setReportHtml("");
     setErrorMessage(null);
   };
 
@@ -150,10 +134,7 @@ function Report() {
     const codeToUse = corpCode;
     if (!codeToUse?.trim()) return;
 
-    // ✅ 이전 보고서 메시지 초기화
-    setMessages([]);
-    localStorage.removeItem("chatMessages");
-
+    setReportHtml("");
     setIsGenerating(true);
     setErrorMessage(null);
     setSearchTerm("");
@@ -165,34 +146,21 @@ function Report() {
 
       if (!response.ok) throw new Error("네트워크 응답이 실패했습니다.");
       const data = await response.text();
-
-      setReportStatus("success");
-
-      const reportAnswer: Message = {
-        id: Date.now(),
-        type: "answer",
-        text: data,
-      };
-
-      // ✅ 이전 메시지가 아니라 완전히 새 메시지만 추가
-      setMessages([reportAnswer]);
+      setReportHtml(data);
     } catch (err) {
       console.error("답변을 가져오는 데 실패했습니다:", err);
       setErrorMessage(
         "보고서를 생성하지 못했습니다. 선택한 기업의 공시 데이터가 없거나 서버에 문제가 있을 수 있습니다."
       );
-      setReportStatus("error");
     } finally {
       setIsGenerating(false);
     }
   };
 
-  const reportHtml =
-    typeof messages[0]?.text === "string" ? (messages[0].text as string) : "";
   const reportTitle = reportHtml ? extractReportTitle(reportHtml) : "";
 
   // ---------- 보고서 결과 화면 ----------
-  if (reportStatus === "success" && reportHtml) {
+  if (reportHtml) {
     const isV2Report = reportHtml.includes('class="fs-report"');
     return (
       <div className="flex min-h-screen w-full flex-col bg-ink-50 font-sans">
@@ -246,7 +214,6 @@ function Report() {
               권유가 아닙니다.
             </p>
           )}
-          <div ref={chatEndRef} />
         </main>
       </div>
     );

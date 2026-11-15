@@ -1,8 +1,15 @@
-import type { ComponentProps } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Sparkles } from "lucide-react";
-import type { Message } from "../ChatContext";
+
+export type Message = {
+  id: number;
+  type: "question" | "answer" | "loading";
+  text: string | ReactNode;
+  isStreaming?: boolean;
+  options?: string[];       // 되묻기 선택지(/chat interrupt)
+};
 
 type BubbleProps = {
   isQuestion: boolean;
