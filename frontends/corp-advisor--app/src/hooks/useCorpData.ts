@@ -39,6 +39,7 @@ export const useCorpData = (query: string) => {
 
   useEffect(() => {
     if (!query) return;
+    let ignore = false; // 늦게 온 이전 검색 응답이 새 결과·스피너를 덮지 않게 한다
 
     const fetchData = async () => {
       setLoading(true);
@@ -60,17 +61,20 @@ export const useCorpData = (query: string) => {
         // 결과가 없거나 실패하면 서버는 success=false와 data=[{}]를 준다
         const result = responseData.success ? responseData.data : [];
 
-        setData(sortByRelevance(result, query));
+        if (!ignore) setData(sortByRelevance(result, query));
       } catch (err) {
-        setError(
+        if (!ignore) setError(
           err instanceof Error ? err.message : "알 수 없는 오류가 발생했습니다."
         );
       } finally {
-        setLoading(false);
+        if (!ignore) setLoading(false);
       }
     };
 
     fetchData();
+    return () => {
+      ignore = true;
+    };
   }, [query]);
 
   return { data, loading, error };
