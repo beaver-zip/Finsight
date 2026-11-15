@@ -134,6 +134,15 @@ def test_financial_company_has_shareholder_section_only():
     assert "<h2>주주환원: 배당이 늘었다</h2>" in html and "현금흐름과 주주환원" not in html
 
 
+def test_ni_hero_does_not_mix_consolidated_net_income():
+    inp = _inputs()
+    inp.industry = "financial"                            # 영업이익률 대신 지배주주 순이익 대표 차트
+    gap = inp.quarters[-2]
+    gap.net_income_owners, gap.net_income = None, D(1e15)  # 지배 계정을 못 찾은 연결(CFS) 분기
+    hero = analyze(inp).charts["hero"]
+    assert hero["kind"] == "ni" and gap.key not in hero["keys"] and max(hero["vals"]) < 1e15
+
+
 def test_cfo_to_net_income_blank_when_cfo_negative():
     inp = _inputs()
     inp.cum[(2026, 2)]["cfo"] = D(-1e11)

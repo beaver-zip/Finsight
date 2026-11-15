@@ -455,7 +455,7 @@ def _opm_history(c: dict) -> None:
 def _ni_hero(c: dict) -> None:
     """영업이익률을 쓸 수 없을 때(금융업, 매출 계정 없음, 이력 부족): 분기 지배주주 순이익."""
     data, rows = c["data"], c["rows"]
-    pts = [(r.key, f(r.net_income_owners if r.net_income_owners is not None else r.net_income)) for r in rows]
+    pts = [(r.key, f(r.net_income_owners)) for r in rows]      # 별도(OFS)·잠정 행은 history·analyze가 이미 채운다
     pts = [(k, v) for k, v in pts if v is not None][-16:]
     if len(pts) < 4:
         return
