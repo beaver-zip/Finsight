@@ -102,6 +102,17 @@ def deterministic_checks(claims: list[Claim], ev: Evidence) -> list[Verification
     return issues
 
 
+def join_spans(text: str, spans: list[tuple[int, int]], limit: int) -> str:
+    """겹치는 (시작, 끝) 구간을 합쳐 " … "로 잇고 limit 글자로 자른다."""
+    merged: list[list[int]] = []
+    for a, b in sorted(spans):
+        if merged and a <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], b)
+        else:
+            merged.append([a, b])
+    return " … ".join(text[a:b] for a, b in merged)[:limit]
+
+
 def _excerpt_for(claim: str, body: str, width: int = 360, limit: int = 1800) -> str:
     """주장에 나온 숫자·명사 주변의 기사 본문 조각(판정 근거). 못 찾으면 본문 앞부분."""
     if not body:
@@ -112,16 +123,7 @@ def _excerpt_for(claim: str, body: str, width: int = 360, limit: int = 1800) -> 
         i = body.find(k)
         if i >= 0:
             spans.append((max(0, i - width // 2), min(len(body), i + len(k) + width // 2)))
-    if not spans:
-        return body[:limit]
-    spans.sort()
-    merged: list[list[int]] = []
-    for a, b in spans:
-        if merged and a <= merged[-1][1]:
-            merged[-1][1] = max(merged[-1][1], b)
-        else:
-            merged.append([a, b])
-    return " … ".join(body[a:b] for a, b in merged)[:limit]
+    return join_spans(body, spans, limit) if spans else body[:limit]
 
 
 def _evidence_block(c: Claim, ev: Evidence) -> dict:
