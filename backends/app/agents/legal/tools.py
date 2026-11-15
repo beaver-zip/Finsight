@@ -1,4 +1,4 @@
-"""법령 검색 도구: 하이브리드 검색 + 리랭크(search_law), 조문·별표 조회, 인용 그래프 확장.
+"""법령 검색 도구: 하이브리드 검색 + 리랭크(search_law), 인용 그래프 확장. 조문·별표 조회는 corpus.get을 쓴다.
 
 LangGraph 서브그래프와 채팅 에이전트가 함께 쓴다. 외부 연결(Weaviate·Neo4j)은 LawTools 하나가 가진다.
 """
@@ -108,11 +108,10 @@ class LawTools:
         await self.vectors.__aexit__(None, None, None)
         await self.graph.close()
 
-    async def search_law(self, query: str, k: int = 8, levels: list[str] | None = None, alpha: float = 0.5,
-                         limit: int = 20) -> list[ArticleHit]:
+    async def search_law(self, query: str, k: int = 8, alpha: float = 0.5, limit: int = 20) -> list[ArticleHit]:
         """약칭 정규화 → 하이브리드(limit) → 리랭크 → 조문별 최고 청크 점수로 상위 k개 부모 조문."""
         q = normalize(query)
-        hits = await self.vectors.hybrid(q, alpha=alpha, limit=limit, levels=levels)
+        hits = await self.vectors.hybrid(q, alpha=alpha, limit=limit)
         scores = await rerank(q, [f"{h.chunk.heading}\n{h.chunk.text}" for h in hits])
         best: dict[str, float] = {}
         for h, s in zip(hits, scores):
@@ -125,18 +124,17 @@ class LawTools:
                 out.append(ArticleHit(article=doc, score=s))
         return out
 
-    def get_article(self, key: str) -> Article | Annex | None:
-        return self.corpus.get(key)
-
     async def expand_citations(self, query: str, keys: list[str], hops: int = 1, lam: float = 0.1,
-                               limit: int = 20) -> list[ArticleHit]:
-        """시드에서 참조·위임 엣지를 hops까지 따라간 후보(가까운 순 limit개)를 질문으로 리랭크하고 점수 − λ·hops로 정렬."""
+                               limit: int = 20, known: dict[str, float] | None = None) -> list[ArticleHit]:
+        """시드에서 참조·위임 엣지를 hops까지 따라간 후보(가까운 순 limit개)를 질문으로 리랭크하고 점수 − λ·hops로 정렬.
+        known(key → 감점 전 점수, 같은 질문)에 있는 후보는 다시 리랭크하지 않고, 새로 낸 점수를 채운다."""
         cands = await self.graph.expand(keys, hops=hops, limit=limit)
         corpus = self.corpus
         docs = [(c, corpus.get(c.key)) for c in cands]
         docs = [(c, d) for c, d in docs if d is not None]
         q = normalize(query)
-        scores = await rerank(q, [focus_text(d, q) for _, d in docs])
-        out = [ArticleHit(article=d, score=s - lam * c.hops, hops=c.hops, path=c.path)
-               for (c, d), s in zip(docs, scores)]
+        known = {} if known is None else known
+        new = [(c, d) for c, d in docs if c.key not in known]
+        known.update(zip([c.key for c, _ in new], await rerank(q, [focus_text(d, q) for _, d in new])))
+        out = [ArticleHit(article=d, score=known[c.key] - lam * c.hops, hops=c.hops, path=c.path) for c, d in docs]
         return sorted(out, key=lambda h: -h.score)

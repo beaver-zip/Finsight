@@ -23,6 +23,8 @@ FILES = UPLOAD_DIR / "files"
 STORE = UPLOAD_DIR / "articles.json"
 MAX_BYTES = 20 * 1024 * 1024
 _HEAD = re.compile(r"(?m)^\s*제\s*(\d+)\s*조(?:\s*의\s*(\d+))?\s*(?:\(([^)\n]{1,60})\))?")
+# 줄 첫머리에 온 본문 참조("제1조에 따른", "제2조(정의) 및 …")는 조 머리가 아니다. 조사는 붙여 쓰므로 띄운 본문("의장은")은 남긴다.
+_REF = re.compile(r"(?:에|의|를|와|과|부터|까지|중|\s*제\s*\d+\s*항|\s+(?:및|또는|이나)\s)")
 _lock = threading.Lock()
 
 
@@ -49,8 +51,13 @@ def save_file(name: str, data: bytes) -> Path:
         raise UploadError(f"{fname}: PDF 형식이 아닙니다")
     FILES.mkdir(parents=True, exist_ok=True)
     path = FILES / fname
-    path.write_bytes(data)
+    # 등록된 문서의 원본은 새 파일 적재가 성공할 때까지 남긴다(register가 옮긴다).
+    (pending_path(path) if fname in all_docs() else path).write_bytes(data)
     return path
+
+
+def pending_path(path: Path) -> Path:
+    return path.with_name(path.name + ".pending")
 
 
 def file_path(name: str) -> Path:
@@ -81,10 +88,10 @@ def _article_keys(file_name: str, article: dict) -> dict:
 
 
 def split_articles(doc_name: str, pages: list[str], *, file_name: str | None = None) -> list[Article]:
-    """조 머리("제N조(제목)")로 나누고, 없으면 쪽 단위로 나눈다. 같은 조 번호가 다시 나오면 앞 조문에 붙인다."""
+    """조 머리("제N조(제목)")로 나누고, 없으면 쪽 단위로 나눈다. 같은 조 번호가 다시 나오면 같은 번호 조문에 붙인다."""
     law = document_key(file_name) if file_name is not None else key_name(doc_name)
     text = "\n".join(pages)
-    heads = list(_HEAD.finditer(text))
+    heads = [m for m in _HEAD.finditer(text) if not _REF.match(text, m.end())]
     out: dict[str, Article] = {}
     if len(heads) >= 2:
         for i, m in enumerate(heads):
@@ -96,7 +103,7 @@ def split_articles(doc_name: str, pages: list[str], *, file_name: str | None = N
             paras = [p for p in paras if p.text]
             if not paras:
                 continue
-            if akey in out:            # 본문에서 다른 조를 인용한 줄이 머리로 잡힌 경우: 앞 조문에 붙인다
+            if akey in out:            # 같은 조 번호가 다시 나온 경우(부칙 등): 같은 번호 조문에 붙인다
                 out[akey].paragraphs += paras
                 continue
             out[akey] = Article(key=akey, law_id="upload", law_name=doc_name, level="내규", no=no, branch=branch,
@@ -141,25 +148,30 @@ def put(file_name: str, doc_name: str, articles: list[Article], chunk_count: int
                            "articles": [_article_keys(file_name, a.model_dump(mode="json")) for a in articles]}
         if vector_name is not None:
             data[file_name]["vector_name"] = vector_name
-        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=UPLOAD_DIR, delete=False) as f:
-            temp = Path(f.name)
-            try:
-                f.write(json.dumps(data, ensure_ascii=False))
-                f.close()
-                temp.replace(STORE)
-            finally:
-                temp.unlink(missing_ok=True)
+        atomic_write(STORE, json.dumps(data, ensure_ascii=False))
         _load.cache_clear()
+
+
+def atomic_write(path: Path, text: str) -> None:
+    """임시 파일에 다 쓴 뒤 교체한다. 중간에 실패해도 기존 파일은 그대로 남는다."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, delete=False) as f:
+        temp = Path(f.name)
+        try:
+            f.write(text)
+            f.close()
+            temp.replace(path)
+        finally:
+            temp.unlink(missing_ok=True)
 
 
 def remove(file_name: str) -> dict | None:
     with _lock:
         data = dict(_load())
         d = data.pop(file_name, None)
-        STORE.write_text(json.dumps(data, ensure_ascii=False))
+        atomic_write(STORE, json.dumps(data, ensure_ascii=False))
         _load.cache_clear()
     p = FILES / file_name
-    if p.is_file():
-        p.unlink()
+    p.unlink(missing_ok=True)
+    pending_path(p).unlink(missing_ok=True)
     return d

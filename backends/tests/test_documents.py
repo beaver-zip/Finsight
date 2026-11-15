@@ -55,6 +55,15 @@ def test_split_articles_by_heading_and_by_page():
     assert [a.key for a in loose] == ["메모:1", "메모:3"] and loose[0].title == "1쪽"
 
 
+@pytest.mark.parametrize("ref", ["제1조에 따른 목적에 맞게 해석한다.", "제5조에 따른다.", "제1조(목적)에 따른 목적에 맞게 해석한다."])
+def test_split_articles_keeps_line_start_reference_in_current_article(ref):
+    pages = [f"제1조(목적) 이 규정은 내부통제를 정한다.\n제2조(정의) 용어의 뜻은\n{ref}\n제3조(책임) 의장은 점검한다."]
+    arts = {a.key: a for a in uploads.split_articles("내규", pages)}
+    assert list(arts) == ["내규:1", "내규:2", "내규:3"]
+    assert [p.text for p in arts["내규:1"].paragraphs] == ["이 규정은 내부통제를 정한다."]
+    assert ref in arts["내규:2"].paragraphs[0].text
+
+
 class FakeVectors:
     def __init__(self):
         self.chunks, self.deleted = [], []
@@ -87,8 +96,32 @@ def test_upload_register_list_delete_roundtrip(store):
     assert files == [{"file_name": "내규.pdf", "chunk_count": 2, "articles": 2}]
     assert c.post("/files/download-pdf/", json={"file_name": "내규.pdf"}).content[:4] == b"%PDF"
     assert c.post("/rag/delete_objects_from_file_name", json={"file_name": "없는.pdf"}).status_code == 404
+    uploads.save_file("내규.pdf", pdf)  # 적재 전 교체본(pending)도 함께 지워야 한다
     assert c.post("/rag/delete_objects_from_file_name", json={"file_name": "내규.pdf"}).json() == {"deleted": "내규.pdf"}
-    assert vec.chunks == [] and uploads.all_docs() == {} and not (store / "files" / "내규.pdf").exists()
+    assert vec.chunks == [] and uploads.all_docs() == {} and list((store / "files").iterdir()) == []
+
+
+def test_upload_rejects_oversized_file_without_truncating(store, monkeypatch):
+    app = FastAPI()
+    app.include_router(documents.files_router, prefix="/files")
+    monkeypatch.setattr(uploads, "MAX_BYTES", 8)
+    r = TestClient(app).post("/files/upload-pdf", files=[("files", ("큰.pdf", b"%PDF-1.4 0123456789", "application/pdf"))])
+    assert r.status_code == 400 and "20MB" in r.json()["detail"]["rejected"][0]["reason"]
+    assert not (store / "files" / "큰.pdf").exists()
+
+
+def test_unregistered_upload_is_listed_and_deletable(store):
+    vec = FakeVectors()
+    app = FastAPI()
+    app.include_router(documents.rag_router, prefix="/rag")
+    app.dependency_overrides[get_state] = lambda: NS(law_tools=NS(vectors=vec))
+    c = TestClient(app)
+    uploads.save_file("비밀.pdf", _pdf("Scanned."))
+    files = c.get("/rag/show_files_in_collection").json()["unique_file_name_and_chunk"]
+    assert files == [{"file_name": "비밀.pdf", "chunk_count": 0, "articles": 0}]
+    assert c.post("/rag/delete_objects_from_file_name", json={"file_name": "비밀.pdf"}).json() == {"deleted": "비밀.pdf"}
+    assert vec.deleted == [] and list((store / "files").iterdir()) == []
+    assert c.post("/rag/delete_objects_from_file_name", json={"file_name": "비밀.pdf"}).status_code == 404
 
 
 def test_admin_token(monkeypatch):
@@ -103,6 +136,7 @@ def test_admin_token(monkeypatch):
     assert c.post("/admin/legal/reset").status_code == 403
     monkeypatch.setattr(s, "admin_token", SecretStr("t0ken"))
     assert c.post("/admin/legal/reset", headers={"X-Admin-Token": "nope"}).status_code == 401
+    assert c.post("/admin/legal/reset", headers=[(b"X-Admin-Token", "é".encode())]).status_code == 401
 
     async def fake_reset():
         return {"ok": True}
@@ -117,12 +151,13 @@ async def test_failed_replacement_preserves_old_document_and_retry(store, monkey
 
     vec = FakeVectors()
     st = NS(law_tools=NS(vectors=vec))
-    uploads.save_file("내규.pdf", _pdf("Old policy."))
+    old_pdf, new_pdf = _pdf("Old policy."), _pdf("New policy.\fAnother new page.")
+    uploads.save_file("내규.pdf", old_pdf)
     uploads.save_file("다른.pdf", _pdf("Other policy."))
     await documents.register(documents.FileNames(file_name=["내규.pdf", "다른.pdf"]), st)
     before = deepcopy(uploads.all_docs())
     old_chunks = list(vec.chunks)
-    uploads.save_file("내규.pdf", _pdf("New policy.\fAnother new page."))
+    uploads.save_file("내규.pdf", new_pdf)
 
     async def fail_add(chunks):
         if failure == "partial":
@@ -142,9 +177,12 @@ async def test_failed_replacement_preserves_old_document_and_retry(store, monkey
     assert uploads.all_docs() == before
     assert vec.chunks == old_chunks
     assert uploads.get_article(uploads.document_key("내규.pdf") + ":1").paragraphs[0].text == "Old policy."
+    assert (store / "files" / "내규.pdf").read_bytes() == old_pdf
 
     result = await documents.register(documents.FileNames(file_name=["내규.pdf"]), st)
     assert not result["failed"] and result["registered"][0]["chunk_count"] == 2
+    assert sorted(p.name for p in (store / "files").iterdir()) == sorted(["내규.pdf", "다른.pdf"])
+    assert (store / "files" / "내규.pdf").read_bytes() == new_pdf
     assert sorted(c.text for c in vec.chunks) == ["Another new page.", "New policy.", "Other policy."]
     assert uploads.all_docs()["다른.pdf"] == before["다른.pdf"]
     assert uploads.get_article(uploads.document_key("내규.pdf") + ":1").paragraphs[0].text == "New policy."
@@ -168,6 +206,31 @@ def test_metadata_replace_failure_keeps_disk_and_cache(store, monkeypatch):
     uploads._load.cache_clear()
     assert uploads.get_article(uploads.document_key("내규.pdf") + ":1").paragraphs[0].text == "Old policy."
     assert set(store.iterdir()) == before_files
+
+
+def test_metadata_writes_are_atomic(store, monkeypatch, tmp_path):
+    from pathlib import Path
+
+    from app.core.law import corpus
+
+    uploads.put("내규.pdf", "내규", uploads.split_articles("내규", ["Old policy."]), 1)
+    monkeypatch.setattr(corpus, "CORPUS_FILE", tmp_path / "law" / "corpus.json")
+    corpus.save([])
+    before = uploads.STORE.read_bytes(), corpus.CORPUS_FILE.read_bytes()
+    before_files = set(tmp_path.rglob("*"))
+
+    def fail_replace(self, target):
+        raise OSError("injected rename failure")
+
+    monkeypatch.setattr(Path, "replace", fail_replace)
+    with pytest.raises(OSError):
+        uploads.remove("내규.pdf")
+    with pytest.raises(OSError):
+        corpus.save([NS(name="법", key_name="법", law_id="1", level="법률", serial="1", effective_date=None,
+                        promulgation_no="", articles=[], annexes=[], delegations=[])])
+    assert (uploads.STORE.read_bytes(), corpus.CORPUS_FILE.read_bytes()) == before
+    assert set(tmp_path.rglob("*")) == before_files
+    corpus.load_corpus.cache_clear()
 
 
 @pytest.mark.asyncio
