@@ -172,16 +172,20 @@ async def advice_check(claims: list[Claim]) -> list[VerificationIssue]:
 
 async def verify(claims: list[Claim], ev: Evidence, *, judged: dict[str, list[VerificationIssue]] | None = None
                  ) -> VerificationResult:
-    """judged: 이미 LLM 판정을 받은 주장 텍스트 → 결과. 바뀌지 않은 주장은 다시 판정하지 않는다."""
+    """judged: 이미 LLM 판정을 받은 주장(문장+근거 ID) → 결과. 바뀌지 않은 주장은 다시 판정하지 않는다."""
     judged = judged if judged is not None else {}
     issues = deterministic_checks(claims, ev)
-    todo = [c for c in claims if c.text not in judged]
+
+    def key(c: Claim) -> str:   # 근거 ID가 바뀌면 판정 근거(_evidence_block)도 바뀐다
+        return c.model_dump_json(exclude={"id"})
+
+    todo = [c for c in claims if key(c) not in judged]
     if todo:
         found = await support_check(todo, ev) + await advice_check(todo)
         for c in todo:
-            judged[c.text] = [i for i in found if i.claim_id == c.id]
+            judged[key(c)] = [i for i in found if i.claim_id == c.id]
     for c in claims:
-        issues += [i.model_copy(update={"claim_id": c.id}) for i in judged.get(c.text, [])]
+        issues += [i.model_copy(update={"claim_id": c.id}) for i in judged.get(key(c), [])]
     return VerificationResult(passed=not issues, issues=issues)
 
 
