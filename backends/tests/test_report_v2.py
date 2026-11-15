@@ -413,7 +413,7 @@ async def test_dart_cached_uses_stale_value_when_dart_fails(temp_cache):
 def _redirect_to_error_page(req):
     if req.url.path.endswith("error.html"):
         return httpx.Response(200, text="<html>" + "점검 중" * 100 + "</html>")
-    return httpx.Response(302, headers={"location": "https://opendart.fss.or.kr/error.html"})
+    return httpx.Response(302, headers={"location": f"https://opendart.fss.or.kr/error.html?ret={req.url}"})
 
 
 async def test_dart_redirect_is_dart_error_even_on_redirect_following_client(monkeypatch):
@@ -421,12 +421,13 @@ async def test_dart_redirect_is_dart_error_even_on_redirect_following_client(mon
     from app.core.dart import client
     from app.core.dart.client import DartClient, DartError
 
-    monkeypatch.setattr(client, "require", lambda value, name: "test")
+    monkeypatch.setattr(client, "require", lambda value, name: "SECRETKEY")
     async with httpx.AsyncClient(transport=httpx.MockTransport(_redirect_to_error_page), follow_redirects=True) as http:
         dart = DartClient(http)
         with pytest.raises(DartError) as e:
             await dart.json("list", corp_code="00126380")
-        assert e.value.status == "302"
+        assert e.value.status == "302" and "error.html" in str(e.value)
+        assert "SECRETKEY" not in str(e.value)                 # 오류 문구·로그에 인증키가 섞이지 않는다
         with pytest.raises(DartError):
             await dart.binary("corpCode.xml")
 

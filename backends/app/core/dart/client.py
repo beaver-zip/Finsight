@@ -57,7 +57,8 @@ class DartClient:
             except httpx.HTTPStatusError as e:
                 # 예외 메시지에는 인증키가 든 URL이 있으므로 그대로 올리거나 기록하지 않는다
                 code = e.response.status_code
-                to = e.response.headers.get("location", "")
+                to = httpx.URL(e.response.headers.get("location", "")).copy_with(query=None)   # 질의에 키가 올 수 있다
+                to = str(to) if to.host or to.path else ""
                 last = DartError(str(code), f"HTTP {code}{' → ' + to if to else ''} ({path})")
                 log.warning("OpenDART %s 실패 %d: HTTP %s %s", path, attempt + 1, code, to)
                 if code < 500:          # 3xx·4xx(점검·접속 제한 페이지 등)는 다시 불러도 같다
