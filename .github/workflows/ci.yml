@@ -40,6 +40,8 @@ jobs:
       - run: npm ci
       - name: 프론트 회귀 검사
         run: npm test
+      - name: 린트
+        run: npm run lint
       - name: 타입 검사와 빌드
         run: npm run build
 
