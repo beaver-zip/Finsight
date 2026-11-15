@@ -56,7 +56,10 @@ def test_split_articles_by_heading_and_by_page():
     assert [a.key for a in loose] == ["메모:1", "메모:3"] and loose[0].title == "1쪽"
 
 
-@pytest.mark.parametrize("ref", ["제1조에 따른 목적에 맞게 해석한다.", "제5조에 따른다.", "제1조(목적)에 따른 목적에 맞게 해석한다."])
+@pytest.mark.parametrize("ref", ["제1조에 따른 목적에 맞게 해석한다.", "제5조에 따른다.", "제1조(목적)에 따른 목적에 맞게 해석한다.",
+                                 "제2조제3호에 따른 임원으로 한다.", "제1조ㆍ제2조에 따른 사항을 지킨다.",
+                                 "제1조, 제2조를 지킨다.", "제2조 각 호의 사람이다.", "제1조는 적용하지 아니한다.",
+                                 "제1조로 정한다."])
 def test_split_articles_keeps_line_start_reference_in_current_article(ref):
     pages = [f"제1조(목적) 이 규정은 내부통제를 정한다.\n제2조(정의) 용어의 뜻은\n{ref}\n제3조(책임) 의장은 점검한다."]
     arts = {a.key: a for a in uploads.split_articles("내규", pages)}
@@ -547,3 +550,11 @@ async def test_unregistered_upper_case_pdf_is_listed(store):
     uploads.save_file("Policy.PDF", _pdf("Scanned."))
     files = (await documents.show_files())["unique_file_name_and_chunk"]
     assert files == [{"file_name": "Policy.PDF", "chunk_count": 0, "articles": 0}]
+
+
+def test_split_articles_splits_untitled_heading_before_particle_like_body():
+    pages = ["제1조(목적) 이 규정은 내부통제를 정한다.\n제2조 의장은 매년 점검한다.\n제3조 가맹점은 보고한다.\n"
+             "제4조 (정의) 용어를 정한다."]
+    arts = {a.key: a for a in uploads.split_articles("내규", pages)}
+    assert list(arts) == ["내규:1", "내규:2", "내규:3", "내규:4"]
+    assert arts["내규:2"].paragraphs[0].text == "의장은 매년 점검한다." and arts["내규:4"].title == "정의"

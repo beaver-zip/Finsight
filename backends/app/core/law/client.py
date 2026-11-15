@@ -19,6 +19,7 @@ log = logging.getLogger(__name__)
 BASE = "https://www.law.go.kr/DRF"
 RETRY_DELAYS = (1, 2, 4, 8)
 _OC = re.compile(r"(OC=)[^&\"'<\s]*")
+_ROOT = {"law": "<기본정보>", "admrul": "<행정규칙기본정보>", "lsDelegated": "<lsDelegated>"}
 
 
 class LawApiError(RuntimeError):
@@ -67,8 +68,9 @@ class LawClient:
         if hit is not None:
             return hit
         text = await self._get(path, params)
-        # 키 오류도 200으로 온다(scripts/check_keys.py와 같은 기준). 검색이 먼저 실패하므로 검색만 본다.
-        if path == "lawSearch.do" and "<resultCode>00</resultCode>" not in text:
+        # 키·권한 오류도 200으로 온다. 검색은 resultCode, 본문 조회는 parser가 읽는 요소가 있어야 캐시한다.
+        need = "<resultCode>00</resultCode>" if path == "lawSearch.do" else _ROOT.get(params.get("target"))
+        if need and need not in text:
             raise LawApiError(f"법령 API {path} 실패 응답(LAW_OC 키·등록 IP 확인)")
         await cache.set("law", key, text, ttl_s=ttl)
         return text
