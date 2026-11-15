@@ -263,3 +263,39 @@ async def test_pipeline_raises_when_every_summary_hits_api_error(monkeypatch):
     with pytest.raises(anthropic.APIError):
         await P.run_pipeline(CorpProfile(corp_code="1", corp_name="삼성전자"), [], http=None, now=NOW)
     assert len(calls) == 5
+
+
+async def test_cancelling_every_waiter_stops_shared_pipeline(monkeypatch):
+    # 채팅 탭을 닫으면 기다리던 호출이 취소된다. 남은 호출이 있으면 결과를 받고, 없으면 유료 검색을 더 돌리지 않는다
+    from app.agents.news import pipeline as P
+    from app.domain.models import CorpProfile
+
+    started, gate, searched = asyncio.Event(), asyncio.Event(), []
+
+    async def plans(*a, **k):
+        started.set()
+        await gate.wait()
+        return []
+
+    async def search(*a, **k):
+        searched.append(1)
+        return []
+    monkeypatch.setattr(P, "plan_queries", plans)
+    monkeypatch.setattr(P, "_search_all", search)
+    corp = CorpProfile(corp_code="1", corp_name="가")
+    first, second = (asyncio.create_task(P.run_pipeline(corp, [], http=None)) for _ in range(2))
+    await started.wait()
+    first.cancel()
+    gate.set()
+    assert (await second).note == "최근 기사를 찾지 못했다" and first.cancelled()
+
+    started.clear()
+    gate.clear()
+    searched.clear()
+    only = asyncio.create_task(P.run_pipeline(corp, [], http=None))
+    await started.wait()
+    only.cancel()
+    gate.set()
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert only.cancelled() and searched == [] and not P._running

@@ -221,6 +221,7 @@ async def _to_candidates(hits: list[tuple[int, SearchHit]], http: httpx.AsyncCli
 
 # ---------- 전체 ----------
 _running: dict[tuple, asyncio.Task] = {}
+_waiters: dict[asyncio.Task, int] = {}
 
 
 async def run_pipeline(corp: CorpProfile, disclosures: list[Disclosure], *, http: httpx.AsyncClient,
@@ -234,9 +235,17 @@ async def run_pipeline(corp: CorpProfile, disclosures: list[Disclosure], *, http
     if key not in _running:
         _running[key] = asyncio.ensure_future(_run_pipeline(corp, disclosures, http=http, config=config, now=now))
         _running[key].add_done_callback(lambda _: _running.pop(key, None))
-    # shortcut: 비용은 먼저 시작한 호출의 요청 범위(budget.request_scope)에만 잡히고, 기다리던 호출이 모두 취소돼도
-    # 실행은 끝까지 돈다. 리포트 cost_usd를 정확히 나눠야 하면 공유 실행의 사용량을 합류한 범위에도 더한다
-    return await asyncio.shield(_running[key])
+    task = _running[key]
+    _waiters[task] = _waiters.get(task, 0) + 1
+    # shortcut: 비용은 먼저 시작한 호출의 요청 범위(budget.request_scope)에만 잡힌다.
+    # 리포트 cost_usd를 정확히 나눠야 하면 공유 실행의 사용량을 합류한 범위에도 더한다
+    try:
+        return await asyncio.shield(task)
+    finally:
+        _waiters[task] -= 1
+        if not _waiters[task]:
+            del _waiters[task]
+            task.cancel()       # 기다리던 호출이 모두 취소됐으면 유료 검색·요약을 멈춘다(끝난 실행에는 영향 없음)
 
 
 async def _run_pipeline(corp: CorpProfile, disclosures: list[Disclosure], *, http: httpx.AsyncClient,
