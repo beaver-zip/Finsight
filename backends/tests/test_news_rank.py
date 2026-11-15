@@ -72,6 +72,30 @@ async def test_embed_empty_and_pipeline_without_hits(monkeypatch):
     assert res.items == [] and res.note == "최근 기사를 찾지 못했다"
 
 
+async def test_concurrent_pipelines_for_same_corp_share_one_run(monkeypatch):
+    # 채팅 기업+뉴스 질문: 리포트 캐시가 없으면 리포트의 get_news와 뉴스 과업이 같은 기업 파이프라인을 동시에 부른다
+    from app.agents.news import pipeline as P
+    from app.domain.models import CorpProfile
+
+    planned = []
+
+    async def plans(corp, *a, **k):
+        planned.append(corp.corp_code)
+        await asyncio.sleep(0)
+        return []
+
+    async def none(*a, **k):
+        return []
+    monkeypatch.setattr(P, "plan_queries", plans)
+    monkeypatch.setattr(P, "_search_all", none)
+    a, b = CorpProfile(corp_code="1", corp_name="가"), CorpProfile(corp_code="2", corp_name="나")
+    r1, r2, r3 = await asyncio.gather(P.run_pipeline(a, [], http=None), P.run_pipeline(a, [], http=None),
+                                      P.run_pipeline(b, [], http=None))
+    assert sorted(planned) == ["1", "2"] and r1 is r2 and r3 is not r1
+    await P.run_pipeline(a, [], http=None)                  # 끝난 실행은 다시 쓰지 않는다
+    assert sorted(planned) == ["1", "1", "2"]
+
+
 @pytest.mark.parametrize("api_error", [False, True])
 async def test_pipeline_researches_missing_aspects_and_fills_failed_summaries(monkeypatch, api_error):
     # 첫 검색이 2개 측면만 덮으면 1년 범위로 재검색하고, 요약에 실패한 기사는 다음 순위 기사로 채운다.

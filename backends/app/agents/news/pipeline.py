@@ -214,9 +214,25 @@ async def _to_candidates(hits: list[tuple[int, SearchHit]], http: httpx.AsyncCli
 
 
 # ---------- 전체 ----------
+_running: dict[tuple, asyncio.Task] = {}
+
+
 async def run_pipeline(corp: CorpProfile, disclosures: list[Disclosure], *, http: httpx.AsyncClient,
                        config: NewsConfig | None = None, now: datetime | None = None) -> NewsResult:
+    """같은 기업·공시·설정으로 동시에 들어온 호출은 한 번만 돌리고 결과를 나눈다(채팅 기업+뉴스 질문에서 리포트
+    캐시가 없으면 리포트의 get_news와 뉴스 과업이 겹친다). 끝난 실행은 다시 쓰지 않는다."""
     config = config or NewsConfig()
+    key = (corp.corp_code, tuple(d.rcept_no for d in disclosures), repr(config), now)
+    if key not in _running:
+        _running[key] = asyncio.ensure_future(_run_pipeline(corp, disclosures, http=http, config=config, now=now))
+        _running[key].add_done_callback(lambda _: _running.pop(key, None))
+    # shortcut: 비용은 먼저 시작한 호출의 요청 범위(budget.request_scope)에만 잡히고, 기다리던 호출이 모두 취소돼도
+    # 실행은 끝까지 돈다. 리포트 cost_usd를 정확히 나눠야 하면 공유 실행의 사용량을 합류한 범위에도 더한다
+    return await asyncio.shield(_running[key])
+
+
+async def _run_pipeline(corp: CorpProfile, disclosures: list[Disclosure], *, http: httpx.AsyncClient,
+                        config: NewsConfig, now: datetime | None) -> NewsResult:
     now = now or datetime.now(KST)
     name = re.sub(r"\(주\)|㈜|주식회사", "", corp.corp_name).strip()
     disc_dates = {d.rcept_no: d.rcept_dt for d in disclosures}
