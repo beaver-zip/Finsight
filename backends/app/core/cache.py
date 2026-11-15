@@ -11,6 +11,9 @@ from pathlib import Path
 from typing import Any
 
 
+STALE_KEEP_S = 7 * 86_400      # 날짜가 든 키(px·dart.list 등)는 다시 읽히지 않아 시작할 때 이만큼 지난 것을 지운다
+
+
 def make_key(*parts: Any) -> str:
     """임의 값들을 안정적인 해시 키로 만든다(dict 키 순서와 무관)."""
     raw = json.dumps(parts, ensure_ascii=False, sort_keys=True, default=str)
@@ -75,9 +78,10 @@ class SQLiteCache:
         await asyncio.to_thread(self._run, "DELETE FROM kv WHERE namespace=? AND key=?", (namespace, key))
 
     async def purge_expired(self) -> int:
+        """만료된 지 STALE_KEEP_S가 지난 줄을 지운다. 그보다 최근 것은 원천 장애 때 cached()가 쓴다."""
         rows = await asyncio.to_thread(
             self._run, "DELETE FROM kv WHERE expires_at IS NOT NULL AND expires_at < ? RETURNING 1",
-            (time.time(),))
+            (time.time() - STALE_KEEP_S,))
         return len(rows)
 
     async def record_cost(self, entry: dict) -> None:

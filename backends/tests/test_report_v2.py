@@ -4,15 +4,19 @@ from __future__ import annotations
 from datetime import date, timedelta
 from decimal import Decimal as D
 
+import httpx
 import pytest
 
 from app.agents.company import writer
-from app.agents.company.analysis import Consensus, Inputs, analyze, clean_title, ret_between
-from app.agents.company.render import Text, render_report, table_html, ticks
+from app.agents.company.analysis import Consensus, Inputs, analyze, make_inputs, ret_between
+from app.domain.sources import clean_title
+from app.agents.company.collect import Collected
+from app.agents.company.render import Text, news_html, render_report, table_html, ticks
 from app.core.dart.history import QRow, qkey
 from app.core.dart.prelim import Prelim, PrelimFiling, PrelimRow
 from app.core.dart.shares import BuybackDecision, Dividend, Shares
 from app.core.peers import PeerRow
+from app.domain import fmt
 from app.domain.binding import render, untraceable_numbers
 from app.domain.models import (Block, CorpProfile, Headline, Metric, NewsItem, PeriodicFiling, ReportDraft,
                                VerificationIssue, VerificationResult)
@@ -132,6 +136,36 @@ def test_financial_company_has_shareholder_section_only():
     assert "<h2>주주환원: 배당이 늘었다</h2>" in html and "현금흐름과 주주환원" not in html
 
 
+def test_ni_hero_does_not_mix_consolidated_net_income():
+    inp = _inputs()
+    inp.industry = "financial"                            # 영업이익률 대신 지배주주 순이익 대표 차트
+    gap = inp.quarters[-2]
+    gap.net_income_owners, gap.net_income = None, D(1e15)  # 지배 계정을 못 찾은 연결(CFS) 분기
+    hero = analyze(inp).charts["hero"]
+    assert hero["kind"] == "ni" and gap.key not in hero["keys"] and max(hero["vals"]) < 1e15
+
+
+def test_key_cards_survive_index_failure_and_share_mcap_text():
+    inp = _inputs()
+    inp.index_px = []                                     # 지수 조회 실패
+    for sh in inp.shares.values():
+        sh.common_out *= 2                                # 시가총액 10조~100조 구간
+    data = analyze(inp)
+    cards = {k["label"]: k for k in data.key_data}
+    assert cards["52주 최고"]["value"] == data.facts["hi52.now"].text
+    assert cards["12개월 수익률"]["sub"] == "" and cards["12개월 수익률"]["sub_sign"] is None
+    assert cards["시가총액"]["value"] == data.facts["mcap.now"].text
+
+
+def test_make_inputs_copies_collected_and_defaults_segment_source():
+    base = _inputs()
+    col = Collected(quarters=base.quarters, px=base.px, index_name="KOSDAQ", errors=["x"])
+    inp = make_inputs(base.corp, base.today, base.filing, col, news=None)
+    assert inp.quarters is col.quarters and inp.index_name == "KOSDAQ" and inp.news == [] and inp.consensus is None
+    assert inp.segment_source == Inputs.segment_source and "내부거래 포함" in inp.segment_source
+    assert make_inputs(base.corp, base.today, base.filing, Collected(segment_source="주석")).segment_source == "주석"
+
+
 def test_cfo_to_net_income_blank_when_cfo_negative():
     inp = _inputs()
     inp.cum[(2026, 2)]["cfo"] = D(-1e11)
@@ -155,6 +189,9 @@ def test_events_excess_return_and_rel():
     e = ev[0]
     assert e["ex0"] == pytest.approx(e["day_stock"] - e["day_index"], abs=1e-9)
     assert data.charts["rel"]["rows"][0][1] == pytest.approx(100.0)
+    # 마지막 발표의 3거래일 값이 있어도 '최근 제외' 횟수·평균에는 넣지 않는다
+    assert ev[-1]["ex3"] is not None and data.facts["ev_n.all"].text == "9번"
+    assert data.facts["ev_abs_mean.all"].value == pytest.approx(D(str(round(sum(abs(e["ex0"]) for e in ev[:-1]) / 9, 6))))
 
 
 def test_prelim_path_uses_disclosed_growth_and_consensus():
@@ -170,6 +207,112 @@ def test_prelim_path_uses_disclosed_growth_and_consensus():
     assert f["rev_vs_cons.3Q26P"] == "6.2% 하회"
     assert data.tables["latest"]["heads"][:3] == ["3Q26P", "컨센서스", "차이"]
     assert data.charts["op"]["cons"] == pytest.approx(580e8)
+
+
+def test_ttm_sums_four_consecutive_quarters():
+    data = analyze(_inputs())
+    last4 = _quarters()[-4:]                             # 3Q25~2Q26
+    ni = sum(float(r.net_income_owners) for r in last4)
+    sh = 98_000_000
+    eq = (float(last4[-1].equity_owners) + float(_quarters()[-5].equity_owners)) / 2
+    assert data.facts["ni_ttm.ttm"].value == pytest.approx(D(str(round(ni, 6))))
+    assert float(data.facts["roe.ttm"].value) == pytest.approx(ni / eq * 100, rel=1e-6)
+    px = _px()[-1][1]
+    assert float(data.facts["per.ttm"].value) == pytest.approx(px / (ni / sh), rel=1e-6)
+
+
+def test_money_facts_match_hand_calculation():
+    """고정 입력에서 손으로 낸 값과 맞춘다. 공식이 바뀌면(부호, 기간, 분모) 여기서 걸린다."""
+    inp = _inputs()
+    v = {k: float(m.value) for k, m in analyze(inp).facts.items() if m.value is not None}
+    # 잉여현금흐름 = 영업현금흐름 − 유형자산 취득 − 무형자산 취득(10억), 순현금 = 현금 − 차입금
+    assert v["fcf.H126"] == pytest.approx(6e11 - 1.6e11 - 1e9)
+    assert v["fcf.FY25"] == pytest.approx(8e11 - 3e11 - 1e9)
+    assert v["net_cash.H126"] == pytest.approx(1.9e12 - 2e11)
+    assert v["net_cash.FY25"] == pytest.approx(1.4e12 - 2e11)
+    # 최근 4개 분기(3Q25~2Q26) 지배주주 순이익 = 영업이익 × 0.8
+    ni = sum((1000e8 + 20e8 * i) * m / 100 * 0.8 for i, m in zip(range(18, 22), OPM[18:]))
+    assert v["ni_ttm.ttm"] == pytest.approx(ni) == pytest.approx(1260e8)
+    price, shares = inp.px[-1][1], 98_000_000               # 2025년 소각 뒤 주식 수, 마지막 종가
+    assert v["mcap.now"] == pytest.approx(price * shares)
+    assert v["per.ttm"] == pytest.approx(price * shares / ni, rel=1e-6)
+    equity = lambda i: 10_000e8 + 100e8 * i                  # 지배주주 자본(분기 i)
+    assert v["pbr.now"] == pytest.approx(price / (equity(21) / shares), rel=1e-6)
+    assert v["roe.ttm"] == pytest.approx(ni / ((equity(17) + equity(21)) / 2) * 100, rel=1e-6)   # 1년 전·지금 평균 자본
+
+
+
+@pytest.mark.parametrize("hole", ["value", "row"])
+def test_ttm_with_missing_quarter_is_dropped_not_zero(hole):
+    inp = _inputs()
+    if hole == "value":
+        inp.quarters[-2].net_income_owners = None        # 1Q26 순이익만 없다
+    else:
+        del inp.quarters[-2]                             # 1Q26 분기가 통째로 없다
+    data = analyze(inp)
+    assert data.notes == []
+    assert not {"ni_ttm.ttm", "per.ttm", "roe.ttm"} & set(data.facts)
+    assert "per.rr" in data.facts                        # 최근 분기×4는 그대로
+
+
+def test_annual_growth_needs_the_previous_year():
+    data = analyze(_inputs())
+    assert data.facts["rev_yoy.FY25"].value == pytest.approx(D(str(round((6e12 / 5.5e12 - 1) * 100, 6))))
+    inp = _inputs()
+    del inp.cum[(2024, 4)]
+    data = analyze(inp)
+    assert "rev_yoy.FY25" not in data.facts              # 2023년과 비교해 '2024년 → 2025년'이라 쓰지 않는다
+
+
+def test_prelim_without_revenue_keeps_latest_table():
+    p = Prelim("20261008800004", date(2026, 10, 8), "연결재무제표기준영업(잠정)실적(공정공시)", 2026, 3, "억원", True,
+               rows={"operating_income": PrelimRow(cur=D(600e8), qoq=5.55, yoy=782.50)})
+    cons = Consensus("3Q26", 1600e8, 580e8, "에프앤가이드", "n1", "서울경제", "q")
+    data = analyze(_inputs(prelim=p, consensus=cons))
+    assert data.notes == []
+    assert "latest" in data.tables and data.charts["op"]["cons"] == pytest.approx(580e8)
+    assert data.facts["op_vs_cons.3Q26P"].text == "3.4% 상회"
+    assert "rev_vs_cons.3Q26P" not in data.facts
+
+
+def _split_world(sd: date, ratio: float) -> Inputs:
+    """분할·병합이 있었던 같은 회사: 시세는 수정 주가, 분할 뒤 분기말 주식 수와 분할 뒤 제출한 사업보고서 EPS·DPS는 새 기준."""
+    import dataclasses
+    from calendar import monthrange
+
+    inp = _inputs()
+    inp.splits = [(sd, ratio)]
+    inp.px = [(d, v / ratio) for d, v in inp.px]
+    for (y, q), sh in list(inp.shares.items()):
+        if date(y, q * 3, monthrange(y, q * 3)[1]) >= sd:
+            inp.shares[(y, q)] = dataclasses.replace(sh, **{k: int(getattr(sh, k) * ratio) for k in
+                                                            ("common_issued", "pref_issued", "common_out", "pref_out")})
+    for y, dv in list(inp.dividends.items()):
+        filed = date(y + 1, 3, 15)
+        k = ratio if filed >= sd else 1
+        inp.dividends[y] = Dividend(y, round(dv.eps / k), round(dv.dps_common / k), dv.payout, f"{filed:%Y%m%d}000001")
+    if sd > date(2026, 6, 30):                               # 자기 피어 행: 분할 전 주식 수 × 분할 뒤 시세
+        inp.peers = [dataclasses.replace(r, mcap=r.mcap / ratio, price=r.price / ratio, pbr=r.pbr / ratio,
+                                         per=r.per / ratio) if r.is_self else r for r in inp.peers]
+    return inp
+
+
+@pytest.mark.parametrize("sd, ratio", [
+    (date(2026, 9, 1), 5.0),       # 마지막 정기보고서(2026.06) 뒤 분할
+    (date(2026, 9, 1), 0.1),       # 같은 때 10:1 병합
+    (date(2026, 6, 30), 5.0),      # 분기 마지막 날(주식 수에 이미 반영)
+    (date(2025, 7, 1), 0.1),       # 발행주식 비교 기준(2024년 말)과 현재 사이 병합 → 소각으로 보지 않는다
+    (date(2026, 2, 10), 5.0),      # 사업연도 말 뒤, 사업보고서 제출 전(EPS가 이미 소급 수정됨)
+])
+def test_split_keeps_per_share_values(sd, ratio):
+    base, data = analyze(_inputs()), analyze(_split_world(sd, ratio))
+    for k in ("mcap.now", "per.ttm", "pbr.now", "shares_cut_common.since", "pbr_ratio.peer1"):
+        assert data.facts[k].text == base.facts[k].text, k
+    rows = lambda d, t: {r["head"]: r["cells"] for r in d.tables[t]["rows"]}
+    assert rows(data, "annual")["PER"] == rows(base, "annual")["PER"]
+    assert rows(data, "annual")["EPS"][:3] == [fmt.num(2000 / ratio, 0)] * 3
+    assert rows(data, "annual")["주당배당금"][:3] == [fmt.num(1000 / ratio, 0)] * 3
+    assert rows(data, "peers") == rows(base, "peers")
 
 
 def test_render_without_draft_has_no_raw_slots():
@@ -291,6 +434,15 @@ def test_text_citations_and_unknown_slot():
     assert ">2</sup>" in out and "n9" not in out and "–" in out
 
 
+def test_render_escapes_llm_text_and_blocks_unsafe_links():
+    assert "<img" not in Text({}, [])("<img src=x onerror=alert(1)>")
+    out = news_html([{"no": 1, "id": "n1", "title": "<script>x</script>", "url": "javascript:alert(1)"}],
+                    [{"title": "<b>", "url": "javascript:x"}, {"title": "공시", "url": "https://dart.fss.or.kr/x"}])
+    assert "<script" not in out and "javascript:" not in out and "<b>" not in out
+    # 프론트가 링크 속성을 붙이지 않으므로 외부 링크는 HTML에서 새 탭·noopener로 연다
+    assert out.count('target="_blank" rel="noopener noreferrer"') == 3
+
+
 def test_ticks_and_table_cells():
     assert ticks(0, 107.4, 4) == [0, 30, 60, 90, 120]
     assert ticks(-5.2, 1.9, 4) == [-6, -4, -2, 0, 2]
@@ -321,3 +473,55 @@ async def test_dart_cached_uses_stale_value_when_dart_fails(temp_cache):
     assert await cached("ns", "k", 60, boom) == [2]          # 유효한 캐시는 원천을 부르지 않는다
     with pytest.raises(DartError):
         await cached("ns", "missing", 60, boom)
+
+
+async def test_startup_purge_keeps_recent_stale_fallback(temp_cache):
+    from app.core.dart.client import DartError, cached
+
+    async def boom():
+        raise DartError("800", "시스템 점검")
+
+    await temp_cache.set("px", "old", [1], ttl_s=-8 * 86_400)          # 8일 전에 만료: 지운다
+    await temp_cache.set("dart.list", "recent", [2], ttl_s=-86_400)    # 어제 만료: 점검 대비로 남긴다
+    await temp_cache.set("ns", "forever", [3])
+    assert await temp_cache.purge_expired() == 1
+    assert temp_cache._run("SELECT key FROM kv ORDER BY key") == [("forever",), ("recent",)]
+    assert await cached("dart.list", "recent", 60, boom) == [2]
+
+
+def _redirect_to_error_page(req):
+    if req.url.path.endswith("error.html"):
+        return httpx.Response(200, text="<html>" + "점검 중" * 100 + "</html>")
+    return httpx.Response(302, headers={"location": f"https://opendart.fss.or.kr/error.html?ret={req.url}"})
+
+
+async def test_dart_redirect_is_dart_error_even_on_redirect_following_client(monkeypatch):
+    # main.py의 공유 클라이언트는 follow_redirects=True다. 302를 따라가 점검 HTML을 JSON으로 읽으면 안 된다.
+    from app.core.dart import client
+    from app.core.dart.client import DartClient, DartError
+
+    monkeypatch.setattr(client, "require", lambda value, name: "SECRETKEY")
+    async with httpx.AsyncClient(transport=httpx.MockTransport(_redirect_to_error_page), follow_redirects=True) as http:
+        dart = DartClient(http)
+        with pytest.raises(DartError) as e:
+            await dart.json("list", corp_code="00126380")
+        assert e.value.status == "302" and "error.html" in str(e.value)
+        assert "SECRETKEY" not in str(e.value)                 # 오류 문구·로그에 인증키가 섞이지 않는다
+        with pytest.raises(DartError):
+            await dart.binary("corpCode.xml")
+
+
+async def test_dart_viewer_redirect_is_not_cached(monkeypatch, temp_cache):
+    from app.core.dart import viewer
+
+    monkeypatch.setattr(viewer, "GAP", 0)
+    monkeypatch.setattr(viewer.asyncio, "sleep", _no_sleep)
+    url = f"{viewer.BASE}/dsaf001/main.do?rcpNo=1"
+    async with httpx.AsyncClient(transport=httpx.MockTransport(_redirect_to_error_page), follow_redirects=True) as http:
+        with pytest.raises(RuntimeError):
+            await viewer.fetch(http, url)
+    assert await temp_cache.get("dart.view", url) is None
+
+
+async def _no_sleep(_):
+    return None

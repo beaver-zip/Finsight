@@ -23,15 +23,15 @@ log = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
+
+
 class ChatRequest(BaseModel):
     thread_id: str
     message: str | None = None
     mode: Literal["auto", "legal", "company", "news"] = "auto"
     resume: str | None = None              # 되묻기에 대한 답(선택지 문자열 또는 자유 입력)
-
-
-def _sse(event: str, data: dict) -> str:
-    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
 
 
 def chat_config(st: AppState, thread_id: str) -> dict:
@@ -55,8 +55,9 @@ async def chat(req: ChatRequest, st: AppState = Depends(get_state)):
             return
         usage = budget.start_request()
         try:
+            # durability="exit": 턴 끝·되묻기 때만 상위 체크포인트를 남긴다(단계마다·하위 그래프 상태를 쌓지 않는다)
             async for ns, mode, chunk in st.chat_graph.astream(inp, config=cfg, stream_mode=["updates", "custom"],
-                                                                subgraphs=True):
+                                                                subgraphs=True, durability="exit"):
                 if mode == "custom" and isinstance(chunk, dict) and chunk.get("type") == "progress":
                     yield _sse("progress", {"stage": chunk["stage"], "detail": chunk["detail"]})
                 elif mode == "updates":

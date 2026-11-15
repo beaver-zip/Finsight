@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import io
 import logging
 import re
@@ -27,7 +28,7 @@ from app.domain.accounts import normalize_name
 
 log = logging.getLogger(__name__)
 NO_ID = "-표준계정코드 미사용-"
-VERSION = 2                        # 파서를 고치면 올린다(캐시 키에 들어가 다시 읽는다)
+VERSION = 3                        # 파서를 고치면 올린다(캐시 키에 들어가 다시 읽는다)
 _UNIT = re.compile(r"단위\s*:\s*(백만원|천원|원)")
 _UNITS = {"백만원": Decimal(10) ** 6, "천원": Decimal(1000), "원": Decimal(1)}
 _TERM = re.compile(r"제\s*(\d+)\s*기")
@@ -35,7 +36,7 @@ _AMT = re.compile(r"^\(?-?[\d,]+(?:\.\d+)?\)?$")
 
 
 def _amount(tok: str, k: Decimal) -> Decimal | None:
-    t = tok.replace(" ", "")
+    t = tok.replace(" ", "").replace("△", "-")      # 원문 표는 음수를 △로도 쓴다
     if not _AMT.match(t):
         return None
     neg = t.startswith("(") or t.startswith("-")
@@ -141,6 +142,13 @@ async def periodic_reports(dart: DartClient, corp_code: str, first_year: int, ac
     return out
 
 
+def _read(raw: bytes, rcept_no: str, reprt_code: str) -> tuple[list[dict], str]:
+    with zipfile.ZipFile(io.BytesIO(raw)) as z:
+        main = next((n for n in z.namelist() if n.startswith(rcept_no)), z.namelist()[0])
+        xml = viewer.decode(z.read(main))      # 선언은 utf-8이어도 2022년 무렵 원문은 EUC-KR인 것이 있다
+    return parse_statements(xml, reprt_code, rcept_no)
+
+
 async def statements(dart: DartClient, rcept_no: str, reprt_code: str) -> tuple[list[dict], str]:
     """원문 재무제표 행. 접수번호가 같으면 원문이 바뀌지 않으므로 만료 없이 캐시한다(원문 XML은 저장하지 않는다)."""
     cache = get_cache()
@@ -149,10 +157,7 @@ async def statements(dart: DartClient, rcept_no: str, reprt_code: str) -> tuple[
     if hit is not None:
         return hit["rows"], hit["fs_div"]
     raw = await dart.binary("document.xml", rcept_no=rcept_no)
-    z = zipfile.ZipFile(io.BytesIO(raw))
-    main = next((n for n in z.namelist() if n.startswith(rcept_no)), z.namelist()[0])
-    xml = viewer.decode(z.read(main))      # 선언은 utf-8이어도 2022년 무렵 원문은 EUC-KR인 것이 있다
-    rows, fs_div = parse_statements(xml, reprt_code, rcept_no)
+    rows, fs_div = await asyncio.to_thread(_read, raw, rcept_no, reprt_code)    # 수 MB 원문의 압축 풀기·파싱
     await cache.set("dart.orig", key, {"rows": rows, "fs_div": fs_div})
     log.info("원문 재무제표 %s: %d행(%s)", rcept_no, len(rows), fs_div)
     return rows, fs_div

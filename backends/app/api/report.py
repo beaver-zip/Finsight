@@ -1,16 +1,16 @@
-"""/report/{corp_code}: HTML, /stream(SSE), /json(CompanyReport).
+"""/report/{corp_code}: HTML, /json(CompanyReport).
 
 완성 리포트는 (corp_code, 최신 정기보고서 rcept_no, 그 뒤 최신 잠정실적 rcept_no)로 7일 캐시한다.
 잠정실적이 새로 나오면 키가 바뀌어 다시 만든다.
 """
 from __future__ import annotations
 
-import json
 import logging
+import re
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import PlainTextResponse, StreamingResponse
+from fastapi.responses import PlainTextResponse
 
 from app.core import budget
 from app.core.cache import get_cache
@@ -25,7 +25,11 @@ from app.domain.models import Citation, CompanyReport
 log = logging.getLogger(__name__)
 router = APIRouter()
 WEEK = 7 * 86_400
+HOUR = 3_600                # 외부 수집이 일부 실패한 리포트: 장애가 풀리면 다시 만든다
 VERSION = "v2.4"            # v2.4: 검증을 통과한 완성본만 캐시
+# 장애로 빠졌을 수 있는 자료: collect 하위 갈래, guarded 노드 예외("news: ConnectTimeout: ...").
+# 법령 서브그래프 미연결 같은 설정 문제는 예외 이름이 없어 걸리지 않는다
+_TRANSIENT = re.compile(r"collect\.|(news|disclosures|regulatory): [A-Za-z_]\w*: ")
 
 
 def _to_report(out: dict, cost: float | None) -> CompanyReport:
@@ -46,10 +50,10 @@ def _to_report(out: dict, cost: float | None) -> CompanyReport:
 
 async def _cache_key(st: AppState, corp_code: str):
     profile = await dart_corp.get_profile(st.dart, corp_code)
-    filing = await dart_filings.latest_periodic(st.dart, profile)
+    today = datetime.now(KST).date()        # 그래프(get_filing)와 같은 KST 날짜
+    filing = await dart_filings.latest_periodic(st.dart, profile, today=today)
     prelim = "-"
     if filing is not None:
-        today = datetime.now(KST).date()
         try:
             fl = await prelim_filings(st.dart, corp_code, max(filing.rcept_dt, today - timedelta(days=120)), today)
             if fl:
@@ -66,7 +70,8 @@ def _config(st: AppState) -> dict:
 
 def _cacheable(out: dict, usage: budget.RequestUsage) -> bool:
     ver = out.get("verification")
-    return out.get("draft") is not None and ver is not None and ver.passed and not usage.exceeded
+    return (out.get("draft") is not None and ver is not None and not usage.exceeded
+            and all(i.type == "style" for i in ver.issues))   # 문체 지적만 남은 초안은 완성본이다
 
 
 async def build_report(st: AppState, corp_code: str) -> dict:
@@ -82,17 +87,20 @@ async def build_report(st: AppState, corp_code: str) -> dict:
         rep = _to_report(out, round(usage.cost_usd, 5))
         value = {"html": out.get("html", ""), "json": rep.model_dump(mode="json")}
         if _cacheable(out, usage):
-            await cache.set("report", key, value, ttl_s=WEEK)
+            partial = any(_TRANSIENT.match(e) for e in out.get("errors", []))
+            await cache.set("report", key, value, ttl_s=HOUR if partial else WEEK)
         return value
 
 
+# 예외 → (HTTP 상태, SSE code). DartLimit은 DartError의 하위 클래스라 DartError(502)보다 먼저 본다.
+_ERRORS = ((DartLimit, 429, "DART_LIMIT"), (budget.BudgetExceeded, 402, "BUDGET"),
+           (budget.TokenBudgetExceeded, 429, "TOKEN_BUDGET"))
+
+
 def _http_error(e: Exception) -> HTTPException:
-    if isinstance(e, DartLimit):
-        return HTTPException(429, "OpenDART 요청 한도를 넘었습니다")
-    if isinstance(e, budget.BudgetExceeded):
-        return HTTPException(402, str(e))
-    if isinstance(e, budget.TokenBudgetExceeded):
-        return HTTPException(429, str(e))
+    for cls, status, _ in _ERRORS:
+        if isinstance(e, cls):
+            return HTTPException(status, "OpenDART 요청 한도를 넘었습니다" if cls is DartLimit else str(e))
     if isinstance(e, DartError):
         return HTTPException(502, str(e))
     return HTTPException(500, f"보고서 생성 중 오류: {e}")
@@ -117,53 +125,4 @@ async def report_json(corp_code: str, st: AppState = Depends(get_state)):
 
 def error_code(e: Exception) -> str:
     """SSE error 이벤트 code."""
-    if isinstance(e, DartLimit):
-        return "DART_LIMIT"
-    if isinstance(e, budget.BudgetExceeded):
-        return "BUDGET"
-    if isinstance(e, budget.TokenBudgetExceeded):
-        return "TOKEN_BUDGET"
-    return "INTERNAL"
-
-
-def _sse(event: str, data: dict) -> str:
-    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
-
-
-@router.get("/{corp_code}/stream", summary="단계 진행 + 최종 HTML(SSE)")
-async def report_stream(corp_code: str, st: AppState = Depends(get_state)):
-    async def gen():
-        try:
-            profile, key = await _cache_key(st, corp_code)
-            hit = await get_cache().get("report", key)
-            if hit is not None:
-                yield _sse("final", {"html": hit["html"], "cached": True})
-                return
-            usage = budget.start_request()
-            final: dict = {}
-            cfg = _config(st)
-            async for mode, chunk in st.company_graph.astream({"corp": profile, "errors": []}, config=cfg,
-                                                               stream_mode=["updates", "custom"]):
-                if mode == "custom" and chunk.get("type") == "progress":
-                    yield _sse("progress", {"stage": chunk["stage"], "detail": chunk["detail"]})
-                elif mode == "updates":
-                    for node, upd in chunk.items():
-                        yield _sse("node", {"ns": ["company"], "node": node, "status": "end"})
-                        if isinstance(upd, dict):
-                            final.update({k: v for k, v in upd.items() if k != "errors"})
-                            final.setdefault("errors", []).extend(upd.get("errors", []) or [])
-            final["corp"] = profile
-            rep = _to_report(final, round(usage.cost_usd, 5))
-            if _cacheable(final, usage):
-                await get_cache().set("report", key, {"html": final.get("html", ""),
-                                                      "json": rep.model_dump(mode="json")}, ttl_s=WEEK)
-            for e in final.get("errors", []):
-                yield _sse("error", {"code": "PARTIAL", "message": e, "partial": True})
-            if (tb := budget.token_budget_event(usage)):
-                yield _sse("error", tb)
-            yield _sse("final", {"html": final.get("html", ""), "cost_usd": rep.cost_usd})
-        except Exception as e:  # noqa: BLE001
-            log.exception("report stream 실패")
-            yield _sse("error", {"code": error_code(e), "message": str(e), "partial": False})
-
-    return StreamingResponse(gen(), media_type="text/event-stream")
+    return next((code for cls, _, code in _ERRORS if isinstance(e, cls)), "INTERNAL")

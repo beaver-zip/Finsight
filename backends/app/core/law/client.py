@@ -67,6 +67,9 @@ class LawClient:
         if hit is not None:
             return hit
         text = await self._get(path, params)
+        # 키 오류도 200으로 온다(scripts/check_keys.py와 같은 기준). 검색이 먼저 실패하므로 검색만 본다.
+        if path == "lawSearch.do" and "<resultCode>00</resultCode>" not in text:
+            raise LawApiError(f"법령 API {path} 실패 응답(LAW_OC 키·등록 IP 확인)")
         await cache.set("law", key, text, ttl_s=ttl)
         return text
 

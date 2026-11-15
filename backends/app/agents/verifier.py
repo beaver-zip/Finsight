@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from dataclasses import dataclass, field
@@ -101,6 +102,17 @@ def deterministic_checks(claims: list[Claim], ev: Evidence) -> list[Verification
     return issues
 
 
+def join_spans(text: str, spans: list[tuple[int, int]], limit: int) -> str:
+    """겹치는 (시작, 끝) 구간을 합쳐 " … "로 잇고 limit 글자로 자른다."""
+    merged: list[list[int]] = []
+    for a, b in sorted(spans):
+        if merged and a <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], b)
+        else:
+            merged.append([a, b])
+    return " … ".join(text[a:b] for a, b in merged)[:limit]
+
+
 def _excerpt_for(claim: str, body: str, width: int = 360, limit: int = 1800) -> str:
     """주장에 나온 숫자·명사 주변의 기사 본문 조각(판정 근거). 못 찾으면 본문 앞부분."""
     if not body:
@@ -111,16 +123,7 @@ def _excerpt_for(claim: str, body: str, width: int = 360, limit: int = 1800) -> 
         i = body.find(k)
         if i >= 0:
             spans.append((max(0, i - width // 2), min(len(body), i + len(k) + width // 2)))
-    if not spans:
-        return body[:limit]
-    spans.sort()
-    merged: list[list[int]] = []
-    for a, b in spans:
-        if merged and a <= merged[-1][1]:
-            merged[-1][1] = max(merged[-1][1], b)
-        else:
-            merged.append([a, b])
-    return " … ".join(body[a:b] for a, b in merged)[:limit]
+    return join_spans(body, spans, limit) if spans else body[:limit]
 
 
 def _evidence_block(c: Claim, ev: Evidence) -> dict:
@@ -172,16 +175,21 @@ async def advice_check(claims: list[Claim]) -> list[VerificationIssue]:
 
 async def verify(claims: list[Claim], ev: Evidence, *, judged: dict[str, list[VerificationIssue]] | None = None
                  ) -> VerificationResult:
-    """judged: 이미 LLM 판정을 받은 주장 텍스트 → 결과. 바뀌지 않은 주장은 다시 판정하지 않는다."""
+    """judged: 이미 LLM 판정을 받은 주장(문장+근거 ID) → 결과. 바뀌지 않은 주장은 다시 판정하지 않는다."""
     judged = judged if judged is not None else {}
     issues = deterministic_checks(claims, ev)
-    todo = [c for c in claims if c.text not in judged]
+
+    def key(c: Claim) -> str:   # 근거 ID가 바뀌면 판정 근거(_evidence_block)도 바뀐다
+        return c.model_dump_json(exclude={"id"})
+
+    todo = [c for c in claims if key(c) not in judged]
     if todo:
-        found = await support_check(todo, ev) + await advice_check(todo)
+        sup, adv = await asyncio.gather(support_check(todo, ev), advice_check(todo))   # 서로의 결과를 쓰지 않는다
+        found = sup + adv
         for c in todo:
-            judged[c.text] = [i for i in found if i.claim_id == c.id]
+            judged[key(c)] = [i for i in found if i.claim_id == c.id]
     for c in claims:
-        issues += [i.model_copy(update={"claim_id": c.id}) for i in judged.get(c.text, [])]
+        issues += [i.model_copy(update={"claim_id": c.id}) for i in judged.get(key(c), [])]
     return VerificationResult(passed=not issues, issues=issues)
 
 

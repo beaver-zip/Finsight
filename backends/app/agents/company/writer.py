@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from app.agents.company.analysis import Consensus, ReportData
 from app.agents.news.pipeline import evidence_ok, normalize
+from app.agents.verifier import join_spans
 from app.core import llm
 from app.domain.binding import display
 from app.domain.models import Block, Headline, NewsItem, ReportDraft, VerificationResult
@@ -58,15 +59,7 @@ def _excerpt(text: str, words: tuple[str, ...], width: int = 700, limit: int = 2
     for w in words:
         for m in re.finditer(re.escape(w), text):
             spans.append((max(0, m.start() - width // 2), min(len(text), m.end() + width // 2)))
-    spans.sort()
-    merged: list[list[int]] = []
-    for a, b in spans:
-        if merged and a <= merged[-1][1]:
-            merged[-1][1] = max(merged[-1][1], b)
-        else:
-            merged.append([a, b])
-    out = " … ".join(text[a:b] for a, b in merged)
-    return out[:limit]
+    return join_spans(text, spans, limit)
 
 
 async def extract_consensus(period: str, q_label: str, actual_op: float | None, news: list[NewsItem],

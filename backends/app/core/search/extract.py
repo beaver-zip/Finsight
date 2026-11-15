@@ -1,6 +1,6 @@
 """기사 본문 보충 추출(trafilatura). Tavily raw_content가 200자 미만이거나 발행일이 없을 때만 쓴다.
 
-TLS 검증, 응답 본문 5MB 상한, 리다이렉트 최대 5회, 타임아웃 10초. 결과는 URL로 7일 캐시한다.
+TLS 검증, 응답 본문 5MB 상한, 리다이렉트 최대 5회, 타임아웃 10초. 결과는 URL로 7일 캐시한다(5xx·429·네트워크 오류는 캐시하지 않는다).
 """
 from __future__ import annotations
 
@@ -23,6 +23,8 @@ async def _download(http: httpx.AsyncClient, url: str) -> str | None:
     async with _sem:
         async with http.stream("GET", url, timeout=10, follow_redirects=True,
                                headers={"User-Agent": UA}) as r:
+            if r.status_code >= 500 or r.status_code == 429:
+                r.raise_for_status()            # 일시 오류: 아래 except로 가서 캐시하지 않는다
             if r.status_code >= 400:
                 return None
             buf = bytearray()
@@ -54,5 +56,6 @@ async def fetch_article(url: str, http: httpx.AsyncClient) -> dict:
                 out = {"text": text if len(text) >= 200 else None, "date": d.get("date")}
     except (httpx.HTTPError, UnicodeError) as e:
         log.info("본문 수집 실패 %s: %s", url, e)
+        return out
     await cache.set("article", url, out, ttl_s=WEEK)
     return out

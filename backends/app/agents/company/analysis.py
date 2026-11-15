@@ -5,23 +5,23 @@
 """
 from __future__ import annotations
 
+import dataclasses
 import logging
 import re
 import statistics as st
 from bisect import bisect_right
+from calendar import monthrange
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import Any
 
-from app.core.dart.history import QRow, prev_quarter, qkey
-from app.core.dart.prelim import Prelim, PrelimFiling
-from app.core.dart.shares import BuybackDecision, Dividend, Shares
+from app.agents.company.collect import Collected
+from app.core.dart.history import RC_Q, QRow, prev_quarter, qkey
 from app.core.peers import PeerRow
 from app.domain import fmt
 from app.domain.accounts import CASH_LIKE, DEBT_LIKE
 from app.domain.ksic import industry_short
-from app.domain.sources import outlet_name
+from app.domain.sources import clean_name, clean_title, outlet_name
 from app.domain.models import CorpProfile, Disclosure, Metric, NewsItem, PeriodicFiling
 
 log = logging.getLogger(__name__)
@@ -39,41 +39,23 @@ class Consensus:
     quote: str | None
 
 
-@dataclass
-class Inputs:
+@dataclass(kw_only=True)
+class Inputs(Collected):
+    """collect.Collected + 회사·기준일·정기보고서·컨센서스·뉴스·공시."""
     corp: CorpProfile
     today: date
     filing: PeriodicFiling
-    quarters: list[QRow]
-    prelim: Prelim | None
-    cum: dict[tuple[int, int], dict]
-    shares: dict[tuple[int, int], Shares]
-    splits: list[tuple[date, float]]
-    dividends: dict[int, Dividend]
-    buybacks: list[BuybackDecision]
-    px: list[tuple[date, float]]
-    index_px: list[tuple[date, float]]
-    index_name: str
-    pref_px: float | None
-    prelim_firsts: list[PrelimFiling]
-    segments: dict[tuple[int, int], dict[str, dict[str, Decimal]]]
-    peers: list[PeerRow]
-    consensus: Consensus | None
-    news: list[NewsItem]
-    disclosures: list[Disclosure]
-    industry: str = "general"
+    consensus: Consensus | None = None
+    news: list[NewsItem] = field(default_factory=list)
+    disclosures: list[Disclosure] = field(default_factory=list)
     segment_source: str = "정기보고서 사업부문별 요약 재무 현황(내부거래 포함)"
 
 
-def make_inputs(corp: CorpProfile, today: date, filing: PeriodicFiling, col: Any, *, consensus: Consensus | None = None,
+def make_inputs(corp: CorpProfile, today: date, filing: PeriodicFiling, col: Collected, *, consensus: Consensus | None = None,
                 news: list[NewsItem] | None = None, disclosures: list[Disclosure] | None = None) -> Inputs:
-    """collect.Collected + 뉴스·공시·컨센서스 → Inputs."""
-    return Inputs(corp=corp, today=today, filing=filing, quarters=col.quarters, prelim=col.prelim, cum=col.cum,
-                  shares=col.shares, splits=col.splits, dividends=col.dividends, buybacks=col.buybacks, px=col.px,
-                  index_px=col.index_px, index_name=col.index_name, pref_px=col.pref_px,
-                  prelim_firsts=col.prelim_firsts, segments=col.segments, peers=col.peers, consensus=consensus,
-                  news=list(news or []), disclosures=list(disclosures or []), industry=col.industry,
-                  segment_source=col.segment_source or Inputs.segment_source)
+    return Inputs(**{**vars(col), "segment_source": col.segment_source or Inputs.segment_source}, corp=corp,
+                  today=today, filing=filing, consensus=consensus, news=list(news or []),
+                  disclosures=list(disclosures or []))
 
 
 @dataclass
@@ -91,7 +73,6 @@ class ReportData:
     disclosures: list[dict] = field(default_factory=list)
     facts: dict[str, Metric] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
-    extra: dict[str, Any] = field(default_factory=dict)
 
     def to_json(self) -> dict:
         return {"corp": self.corp, "made": self.made, "asof": self.asof, "latest": self.latest,
@@ -103,10 +84,6 @@ class ReportData:
 # ---------------- 도구
 def f(v: Decimal | float | None) -> float | None:
     return None if v is None else float(v)
-
-
-def clean_name(name: str) -> str:
-    return re.sub(r"\(주\)|㈜|주식회사", "", name or "").strip()
 
 
 def per_label(key: str) -> str:
@@ -175,11 +152,10 @@ def analyze(inp: Inputs) -> ReportData:
                       latest={"key": L.key if L else None, "prelim": pre is not None,
                               "label": (f"{pre.key} 잠정" if pre else (L.key if L else ""))},
                       table_div=1e9 if big else 1e8, table_unit="십억원" if big else "억원")
-    src_dart = "DART"
     sections = [("key", _key_data), ("latest", _latest), ("op", _op_chart), ("opm", _opm_history), ("annual", _annual),
                 ("quarters", _quarter_table), ("segments", _segments), ("valuation", _valuation),
                 ("peers", _peers), ("cash", _cash), ("events", _events), ("rel", _rel), ("news", _news_disc)]
-    ctx = dict(inp=inp, F=F, data=data, rows=rows, qs=qs, by=by, by_all=by_all, L=L, pre=pre, name=name, src=src_dart)
+    ctx = dict(inp=inp, F=F, data=data, rows=rows, qs=qs, by=by, by_all=by_all, L=L, pre=pre, name=name, u=fmt.Units(big))
     for nm, fn in sections:
         try:
             fn(ctx)
@@ -238,31 +214,34 @@ def _key_data(c: dict) -> None:
     for lab, days in (("1M", 30), ("3M", 91), ("6M", 182)):
         r = ret_between(px, days)
         F.add(f"ret{lab}", "now", f"{lab} 주가 수익률", fmt.spct(r), r, "%")
-    sh = inp.shares.get((inp.filing.bsns_year, _q_of(inp.filing.reprt_code)))
-    mcap = None
+    fq = (inp.filing.bsns_year, RC_Q[inp.filing.reprt_code])
+    sh = inp.shares.get(fq)
+    mcap, mcap_txt = None, "–"
     if sh:
-        mcap = last * sh.common_out + (inp.pref_px * sh.pref_out if inp.pref_px and sh.pref_out else 0)
-        F.add("mcap", "now", "시가총액(보통주+우선주)", fmt.money(mcap, 0) if mcap >= 1e14 else fmt.money(mcap), mcap, "KRW")
+        k = _split_factor(inp, _q_end(fq))                # 시세는 분할을 반영한 값이다
+        mcap = last * sh.common_out * k + (inp.pref_px * sh.pref_out * k if inp.pref_px and sh.pref_out else 0)
+        mcap_txt = fmt.money(mcap, 0) if mcap >= 1e14 else fmt.money(mcap)
+        F.add("mcap", "now", "시가총액(보통주+우선주)", mcap_txt, mcap, "KRW")
         if inp.pref_px and sh.pref_out:
             disc = (1 - inp.pref_px / last) * 100
-            c["pref_disc"] = disc
             F.add("pref_disc", "now", "우선주 괴리율(보통주 대비 할인)", fmt.pct(disc), disc, "%", source=f"{fmt.md(last_d)} 종가")
             F.add("pref_px", "now", "우선주 주가", fmt.won(inp.pref_px), inp.pref_px, "n")
-    c["mcap"] = mcap
     data.key_data = [
         {"label": "주가", "value": fmt.won(last), "sub": f"{fmt.spct(day, 2)} {fmt.md(last_d)}" if day is not None else fmt.md(last_d),
          "sign": day},
-        {"label": "시가총액", "value": (f"{mcap / 1e12:,.0f}조원" if mcap and mcap >= 1e13 else fmt.money(mcap)) if mcap else "–",
+        {"label": "시가총액", "value": mcap_txt if mcap else "–",
          "sub": "보통주·우선주 합산" if (sh and sh.pref_out and inp.pref_px) else "보통주"},
     ]
-    data.extra["key_tail"] = {"r12": r12, "rel12": rel12, "hi": hi, "lo": lo, "index": inp.index_name}
-
-
-def _q_of(rc: str) -> int:
-    return {"11013": 1, "11012": 2, "11014": 3, "11011": 4}[rc]
+    c["key_tail"] = {"r12": r12, "rel12": rel12, "hi": hi, "lo": lo, "index": inp.index_name}
 
 
 # ---------------- 최근 분기
+def _ttm(by: dict[str, QRow], year: int, q: int, k: str) -> float | None:
+    """(year, q)까지 이어진 4개 분기 합. 한 분기라도 없으면 None(빈 분기를 0으로 더하지 않는다)."""
+    vals = [f(getattr(r, k)) if (r := by.get(qkey(*prev_quarter(year, q, n)))) else None for n in range(4)]
+    return None if None in vals else sum(vals)
+
+
 def _growth(cur: float | None, base: float | None) -> float | None:
     if cur is None or base is None or base <= 0 or cur <= 0:
         return None
@@ -280,7 +259,6 @@ def _latest(c: dict) -> None:
     lab = data.latest["label"]
     rev, op = f(L.revenue), f(L.operating_income)
     opm = op / rev * 100 if rev and op is not None else None
-    c["opm_L"] = opm
     srcL = f"영업(잠정)실적 공시 rcpNo {pre.rcept_no}" if pre else f"DART rcpNo {L.rcept_no}"
     F.add("rev", lk, f"매출액({lab})", fmt.money(rev), rev, "KRW", source=srcL)
     F.add("op", lk, f"영업이익({lab})", fmt.money(op), op, "KRW", source=srcL)
@@ -338,17 +316,19 @@ def _latest(c: dict) -> None:
         c_opm = c_op / c_rev * 100 if c_rev and c_op else None
         who = f"{cons.provider} 컨센서스" if cons.provider else "컨센서스"
         src = f"{cons.outlet} 보도" if cons.outlet else None
+        rev_vs = (rev / c_rev - 1) * 100 if rev is not None and c_rev else None     # 잠정 공시에 매출이 없을 수 있다
+        op_vs = (op / c_op - 1) * 100 if op is not None and c_op else None
         if c_rev:
             F.add("cons_rev", lk, f"{who} 매출액({cons.period})", fmt.money(c_rev), c_rev, "KRW", source=src)
-            F.add("rev_vs_cons", lk, "매출액 컨센서스 대비", fmt.vs((rev / c_rev - 1) * 100), (rev / c_rev - 1) * 100, "%")
+            F.add("rev_vs_cons", lk, "매출액 컨센서스 대비", fmt.vs(rev_vs), rev_vs, "%")
         if c_op:
             F.add("cons_op", lk, f"{who} 영업이익({cons.period})", fmt.money(c_op), c_op, "KRW", source=src)
-            F.add("op_vs_cons", lk, "영업이익 컨센서스 대비", fmt.vs((op / c_op - 1) * 100), (op / c_op - 1) * 100, "%")
+            F.add("op_vs_cons", lk, "영업이익 컨센서스 대비", fmt.vs(op_vs), op_vs, "%")
         if c_opm is not None and opm is not None:
             F.add("cons_opm", lk, "컨센서스 영업이익률", fmt.pct(c_opm), c_opm, "%")
             F.add("opm_vs_cons", lk, "영업이익률 컨센서스 대비", fmt.pp(opm - c_opm), opm - c_opm, "%p")
-        cons_cells = {"rev": (fmt.tbl(c_rev, div), _sgn_cell((rev / c_rev - 1) * 100 if c_rev else None)),
-                      "op": (fmt.tbl(c_op, div), _sgn_cell((op / c_op - 1) * 100 if c_op else None)),
+        cons_cells = {"rev": (fmt.tbl(c_rev, div), _sgn_cell(rev_vs)),
+                      "op": (fmt.tbl(c_op, div), _sgn_cell(op_vs)),
                       "opm": (fmt.num(c_opm), _sgn_cell(opm - c_opm if c_opm is not None and opm is not None else None, "%p"))}
         c["cons"] = {"op": c_op, "rev": c_rev}
 
@@ -399,7 +379,7 @@ def _op_chart(c: dict) -> None:
     if cons:
         legend.append([f"{L.key.rstrip('P')} 컨센서스", "line", "ink"])
     data.charts["op"] = {"keys": [k for k, _ in pts], "vals": [v for _, v in pts], "cons": cons, "label": lab,
-                         "title": title, "subtitle": f"분기 영업이익, {_unit_word(data)}", "legend": legend,
+                         "title": title, "subtitle": f"분기 영업이익, {c['u'].word}", "legend": legend,
                          "source": data.tables.get("latest", {}).get("source", c["name"])}
 
 
@@ -437,13 +417,12 @@ def _opm_history(c: dict) -> None:
                            "peak": [keys[peak_idx], hist[peak_idx]] if peak_idx is not None else None,
                            "current_label": data.latest["label"], "title": title, "subtitle": "분기 영업이익률, %",
                            "source": c["name"]}
-    c["opm_first_year"] = first_year
 
 
 def _ni_hero(c: dict) -> None:
     """영업이익률을 쓸 수 없을 때(금융업, 매출 계정 없음, 이력 부족): 분기 지배주주 순이익."""
     data, rows = c["data"], c["rows"]
-    pts = [(r.key, f(r.net_income_owners if r.net_income_owners is not None else r.net_income)) for r in rows]
+    pts = [(r.key, f(r.net_income_owners)) for r in rows]      # 별도(OFS)·잠정 행은 history·analyze가 이미 채운다
     pts = [(k, v) for k, v in pts if v is not None][-16:]
     if len(pts) < 4:
         return
@@ -454,7 +433,7 @@ def _ni_hero(c: dict) -> None:
     title = (f"분기 순이익이 {first}년 이후 가장 많다" if rank == 1 else
              f"분기 순이익 {fmt.money(vals[-1])}, {len(vals)}개 분기 중 {rank}위")
     data.charts["hero"] = {"kind": "ni", "keys": keys, "vals": vals, "label": data.latest["label"], "title": title,
-                           "subtitle": f"분기 지배주주 순이익, {_unit_word(data)}", "source": c["name"]}
+                           "subtitle": f"분기 지배주주 순이익, {c['u'].word}", "source": c["name"]}
 
 
 # ---------------- 연간 표
@@ -481,7 +460,9 @@ def _annual(c: dict) -> None:
             ni = sum(f(r.net_income_owners) for r in r4)
         sh = _shares_at(inp, (y, 4))
         dv = inp.dividends.get(y)
-        eps = dv.eps if dv and dv.eps else (ni / sh if ni is not None and sh else None)
+        # 공시 EPS·DPS는 사업보고서 제출 때 주식 기준(그 전 분할은 소급 반영), 연말 종가는 지금까지 분할 반영
+        k = _split_factor(inp, _rcept_date(dv.rcept_no) if dv and dv.rcept_no else _q_end((y, 4)))
+        eps = dv.eps / k if dv and dv.eps else (ni / sh if ni is not None and sh else None)
         e = eq.get((y, 4))
         e0 = eq.get((y - 1, 4))
         bps = e / sh if e and sh else None
@@ -491,32 +472,35 @@ def _annual(c: dict) -> None:
                      "eps": eps, "bps": bps, "per": price / eps if price and eps and eps > 0 else None,
                      "pbr": price / bps if price and bps else None,
                      "roe": ni / ((e + e0) / 2) * 100 if ni is not None and e and e0 else None,
-                     "dps": dv.dps_common if dv else None})
+                     "dps": dv.dps_common / k if dv and dv.dps_common else None})
         heads.append(str(y))
         # 연간 실적도 사실표에 둔다(채팅에서 "최근 사업연도 매출액"을 슬롯으로 쓸 수 있게)
         fy = f"FY{str(y)[2:]}"
         F.add("rev", fy, f"매출액({y}년)", fmt.money(rev), rev, "KRW")
         F.add("op", fy, f"영업이익({y}년)", fmt.money(op), op, "KRW")
         F.add("ni", fy, f"지배주주 순이익({y}년)", fmt.money(ni), ni, "KRW")
-        if len(cols) >= 2:
+        if len(cols) >= 2 and heads[-2] == str(y - 1):        # 빠진 해가 있으면 2년 전과 비교하지 않는다
             prev = cols[-2]
             for k, lab in (("rev", "매출액"), ("op", "영업이익")):
                 g = _growth(cols[-1][k], prev[k])
                 F.add(f"{k}_yoy", fy, f"{lab} 전년 대비({y - 1}년 → {y}년)", fmt.change(g), g, "%")
     # 최근 4개 분기와 최근 분기×4
     if len(qs) >= 5:
-        last4 = qs[-4:]
-        ttm = {k: sum(f(getattr(r, k)) or 0 for r in last4) for k in ("revenue", "operating_income", "net_income_owners")}
         lastq = qs[-1]
+        ttm = {k: _ttm(by, lastq.year, lastq.q, k) for k in ("revenue", "operating_income", "net_income_owners")}
+        ni_t = ttm["net_income_owners"]
+        q0 = by.get(qkey(*prev_quarter(lastq.year, lastq.q, 3)))
+        y0 = by.get(qkey(*prev_quarter(lastq.year, lastq.q, 4)))
         sh_now = _shares_at(inp, (lastq.year, lastq.q))
-        e_now, e_prev = f(lastq.equity_owners), f(qs[-5].equity_owners)
+        e_now, e_prev = f(lastq.equity_owners), f(y0.equity_owners) if y0 else None
         price = c.get("last_px")
-        eps_ttm = ttm["net_income_owners"] / sh_now if sh_now else None
+        eps_ttm = ni_t / sh_now if ni_t is not None and sh_now else None
         bps_now = e_now / sh_now if e_now and sh_now else None
-        roe_ttm = ttm["net_income_owners"] / ((e_now + e_prev) / 2) * 100 if e_now and e_prev else None
-        ttm_label = f"{last4[0].key}–{last4[-1].key}"
-        cols.append({"rev": ttm["revenue"], "op": ttm["operating_income"], "ni": ttm["net_income_owners"],
-                     "opm": ttm["operating_income"] / ttm["revenue"] * 100 if ttm["revenue"] else None,
+        roe_ttm = ni_t / ((e_now + e_prev) / 2) * 100 if ni_t is not None and e_now and e_prev else None
+        ttm_label = f"{qkey(*prev_quarter(lastq.year, lastq.q, 3))}–{lastq.key}"
+        cols.append({"rev": ttm["revenue"], "op": ttm["operating_income"], "ni": ni_t,
+                     "opm": ttm["operating_income"] / ttm["revenue"] * 100
+                     if ttm["revenue"] and ttm["operating_income"] is not None else None,
                      "eps": eps_ttm, "bps": bps_now, "per": price / eps_ttm if price and eps_ttm and eps_ttm > 0 else None,
                      "pbr": price / bps_now if price and bps_now else None, "roe": roe_ttm, "dps": None})
         heads.append(ttm_label)
@@ -530,17 +514,14 @@ def _annual(c: dict) -> None:
                      "pbr": price / bps_now if price and bps_now else None,
                      "roe": rr_ni / e_now * 100 if rr_ni is not None and e_now else None, "dps": None})
         heads.append(rr_label)
-        c.update(ttm_label=ttm_label, rr_label=rr_label, eps_ttm=eps_ttm, bps_now=bps_now, roe_ttm=roe_ttm,
-                 per_ttm=cols[-2]["per"], per_rr=cols[-1]["per"], pbr_now=cols[-2]["pbr"], ni_ttm=ttm["net_income_owners"],
-                 rr_ni=rr_ni)
-        F.add("ni_ttm", "ttm", f"최근 4개 분기({ttm_label}) 지배주주 순이익", fmt.money(ttm["net_income_owners"]), ttm["net_income_owners"], "KRW")
+        c.update(ttm_label=ttm_label, rr_label=rr_label, per_ttm=cols[-2]["per"])
+        F.add("ni_ttm", "ttm", f"최근 4개 분기({ttm_label}) 지배주주 순이익", fmt.money(ni_t), ni_t, "KRW")
         F.add("per", "ttm", f"PER(최근 4개 분기 이익, {fmt.md(c.get('last_d', inp.today))} 종가)", fmt.times(cols[-2]["per"]), cols[-2]["per"], "x")
         F.add("per", "rr", f"PER({rr_label} 지배순이익 기준, 단순 연환산)", fmt.times(cols[-1]["per"]), cols[-1]["per"], "x")
         F.add("pbr", "now", "PBR(최근 분기말 지배주주 자본 기준)", fmt.times(cols[-2]["pbr"], 2), cols[-2]["pbr"], "x")
         F.add("roe", "ttm", "ROE(최근 4개 분기, 평균 자본)", fmt.pct(roe_ttm), roe_ttm, "%")
         F.add("ni", lastq.key, f"지배주주 순이익({lastq.key})", fmt.money(f(lastq.net_income_owners)), f(lastq.net_income_owners), "KRW")
-        if len(qs) >= 4:
-            q0 = last4[0]
+        if q0:
             F.add("ni", q0.key, f"지배주주 순이익({q0.key})", fmt.money(f(q0.net_income_owners)), f(q0.net_income_owners), "KRW")
         data.key_data += [
             {"label": "PER", "value": fmt.times(cols[-2]["per"]), "sub": f"{rr_label} 기준 {fmt.times(cols[-1]['per'])}"},
@@ -576,6 +557,15 @@ def _split_factor(inp: Inputs, d: date) -> float:
     return k
 
 
+def _q_end(yq: tuple[int, int]) -> date:
+    y, m = yq[0], yq[1] * 3
+    return date(y, m, monthrange(y, m)[1])
+
+
+def _rcept_date(rcept_no: str) -> date:
+    return date(int(rcept_no[:4]), int(rcept_no[4:6]), int(rcept_no[6:8]))
+
+
 def _shares_at(inp: Inputs, yq: tuple[int, int]) -> float | None:
     """그 분기말 기준 보통+우선 유통주식수(분할 환산). 분기말 주식수가 없으면 직전 사업연도 말 값을 쓴다."""
     cands = [k for k in inp.shares if k <= yq]
@@ -584,20 +574,15 @@ def _shares_at(inp: Inputs, yq: tuple[int, int]) -> float | None:
         if not cands:
             return None
     k = max(cands)
-    sh = inp.shares[k]
-    y, q = k
-    end = date(y, q * 3, 28)
-    return sh.total_out * _split_factor(inp, end)
+    return inp.shares[k].total_out * _split_factor(inp, _q_end(k))
 
 
 # ---------------- 분기·부문 표
 def _quarter_table(c: dict) -> None:
     data, rows = c["data"], c["rows"]
     keys = [r.key for r in rows][-8:]
-    by = {r.key: r for r in rows}
+    by = c["by_all"]
     div = data.table_div
-    segq = c.get("segq")  # _segments가 뒤에 돌기 때문에 표는 _segments에서 마무리한다
-    c["qt_keys"] = keys
     data.tables["quarters"] = {"title": "분기 실적과 부문별 실적", "unit": f"{data.table_unit}, %", "heads": keys,
                                "focal": len(keys) - 1 if by[keys[-1]].preliminary else None, "tips": {},
                                "rows": [{"head": "매출액", "cells": [fmt.tbl(f(by[k].revenue), div) for k in keys]},
@@ -606,7 +591,6 @@ def _quarter_table(c: dict) -> None:
                                                                      if by[k].revenue and by[k].operating_income is not None else "–" for k in keys]},
                                         {"head": "지배순이익", "cells": [fmt.tbl(f(by[k].net_income_owners), div) for k in keys]}],
                                "source": c["name"]}
-    del segq
 
 
 def _segments(c: dict) -> None:
@@ -659,7 +643,7 @@ def _segments(c: dict) -> None:
     if yago in segq and segq[yago][second]["rev"] > 0:
         g = (s2["rev"] / segq[yago][second]["rev"] - 1) * 100
         F.add("seg2_rev_yoy", last, f"{short(second)} 부문 매출 전년 동기 대비({last})", fmt.change(g), g, "%")
-    for i, n in enumerate(sorted(others, key=lambda n: -seg_last[n]["op"]), 3):
+    for i, n in enumerate(others, 3):
         F.add(f"seg{i}_op", last, f"{short(n)} 부문 영업이익({last})", fmt.money(seg_last[n]["op"]), seg_last[n]["op"], "KRW")
     series = [(short(main), "acc", [segq[k][main]["op"] for k in keys]),
               (short(second), "mid", [segq[k][second]["op"] for k in keys])]
@@ -674,8 +658,8 @@ def _segments(c: dict) -> None:
         title = f"영업이익의 {share:.1f}%가 {short(main)}"
     else:
         title = "부문별 영업이익"
-    data.charts["segments"] = {"keys": keys, "series": series, "title": title, "subtitle": f"부문별 분기 영업이익, {_unit_word(data)}",
-                               "focal_label": f"{short(main)} {_u(seg_last[main]['op'], data)}",
+    data.charts["segments"] = {"keys": keys, "series": series, "title": title, "subtitle": f"부문별 분기 영업이익, {c['u'].word}",
+                               "focal_label": f"{short(main)} {c['u'].s(seg_last[main]['op'])}",
                                "neg_label": f"{short(second)} {fmt.money_abs(s2['op'])} 적자" if s2["op"] < 0 else None,
                                "source": c["name"]}
     # 분기 표에 부문 줄 끼우기
@@ -688,32 +672,22 @@ def _segments(c: dict) -> None:
         rev_sub = [{"head": short(n), "cells": segrow(n, "rev"), "sub": True, "tip": tip} for n in (main, second)]
         op_sub = [{"head": short(n), "cells": segrow(n, "op"), "sub": True, "tip": tip} for n in [main, second] + others]
         t["rows"] = [t["rows"][0]] + rev_sub + [t["rows"][1]] + op_sub + t["rows"][2:]
-    c["segq"] = segq
-
-
-def _unit_word(data: ReportData) -> str:
-    return "조원" if data.table_div == 1e9 else "억원"
-
-
-def _u(v: float, data: ReportData) -> str:
-    return f"{v / 1e12:,.1f}" if data.table_div == 1e9 else f"{v / 1e8:,.0f}"
 
 
 # ---------------- 밸류에이션(PBR 밴드·PER)
 def _valuation(c: dict) -> None:
-    inp, F, data, qs = c["inp"], c["F"], c["data"], c["qs"]
+    inp, F, data, qs, by = c["inp"], c["F"], c["data"], c["qs"], c["by"]
     px = inp.px
     if not px or len(qs) < 8:
         return
     pts = []   # (가용일, bps, eps_ttm)
-    for i, r in enumerate(qs):
+    for r in qs:
         sh = _shares_at(inp, (r.year, r.q))
         if not sh or r.equity_owners is None or not r.rcept_no:
             continue
-        avail = date(int(r.rcept_no[:4]), int(r.rcept_no[4:6]), int(r.rcept_no[6:8]))
-        last4 = qs[max(0, i - 3):i + 1]
-        eps = (sum(f(x.net_income_owners) for x in last4) / sh
-               if len(last4) == 4 and all(x.net_income_owners is not None for x in last4) else None)
+        avail = _rcept_date(r.rcept_no)
+        ni4 = _ttm(by, r.year, r.q, "net_income_owners")
+        eps = ni4 / sh if ni4 is not None else None
         pts.append((avail, f(r.equity_owners) / sh, eps))
     pts.sort()
     if not pts:
@@ -769,7 +743,6 @@ def _valuation(c: dict) -> None:
                            "min": band.index(bmin), "max": band.index(bmax), "title": title,
                            "subtitle": "월말 주가와 PBR 배수별 주가, 천원" if mx > 1e4 else "월말 주가와 PBR 배수별 주가, 원",
                            "source": f"{c['name']}, Yahoo Finance"}
-    c["pbr_pos_txt"] = pos_txt
     data.key_data.append({"label": "PBR", "value": fmt.times(cur["pbr"], 2), "sub": f"{first_year}년 이후 {pos_txt}"})
 
 
@@ -790,6 +763,11 @@ def _peers(c: dict) -> None:
     others = [r for r in rows if not r.is_self]
     if me is None or not others:
         return
+    k = _split_factor(inp, _q_end((inp.filing.bsns_year, RC_Q[inp.filing.reprt_code])))
+    if k != 1:          # 자기 행은 공시 주식 수 × 분할 뒤 시세라, 핵심 수치와 같은 기준으로 맞춘다(피어는 core/peers.py 참고)
+        me = dataclasses.replace(me, mcap=me.mcap * k, pbr=me.pbr * k if me.pbr else None,
+                                 per=me.per * k if me.per else None, per_rr=me.per_rr * k if me.per_rr else None)
+        rows = [me if r.is_self else r for r in rows]
     top = max(others, key=lambda r: r.mcap or 0)
     nm = clean_name(top.name)
     F.add("roe", "self", f"{c['name']} ROE(최근 4개 분기)", fmt.pct(me.roe), me.roe, "%")
@@ -828,13 +806,12 @@ def _peers(c: dict) -> None:
                                       "cells": [fmt.tbl(r.mcap, div), fmt.tbl(r.ni_ttm, div), fmt.num(r.roe),
                                                 fmt.num(r.pbr, 2), per_cell(r)]} for r in rows],
                             "source": "각 사, Yahoo Finance"}
-    c["peer1"] = nm
 
 
 # ---------------- 현금흐름·주주환원
 def _cash(c: dict) -> None:
     inp, F, data, qs = c["inp"], c["F"], c["data"], c["qs"]
-    y, q = inp.filing.bsns_year, _q_of(inp.filing.reprt_code)
+    y, q = inp.filing.bsns_year, RC_Q[inp.filing.reprt_code]
     fy_last = y if q == 4 else y - 1
     cols = [(fy_last - 2, 4), (fy_last - 1, 4), (fy_last, 4)]
     if q < 4:
@@ -939,22 +916,25 @@ def _cash(c: dict) -> None:
     else:
         title = "잉여현금흐름과 순현금"
     data.charts["cash"] = {"cols": [[lab(k), vals[k]["fcf"], vals[k]["net_cash"]] for k in fy_cols],
-                           "title": title, "subtitle": f"잉여현금흐름과 기말 순현금, {_unit_word(data)}", "source": c["name"]}
+                           "title": title, "subtitle": f"잉여현금흐름과 기말 순현금, {c['u'].word}", "source": c["name"]}
 
 
 def _shareholder(c: dict, cur: tuple[int, int], fy_last: int) -> None:
     """발행주식수 감소와 진행 중인 자기주식 취득. 금융업에서도 쓴다."""
     inp, F = c["inp"], c["F"]
-    y, q = inp.filing.bsns_year, _q_of(inp.filing.reprt_code)
+    y, q = inp.filing.bsns_year, RC_Q[inp.filing.reprt_code]
     # 발행주식수 감소(소각)
     base_y = fy_last - 1
-    b, n_ = inp.shares.get((base_y, 4)), inp.shares.get(cur) or inp.shares.get((y, q))
+    nk = cur if cur in inp.shares else (y, q)
+    b, n_ = inp.shares.get((base_y, 4)), inp.shares.get(nk)
     if b and n_:
-        cc = (n_.common_issued / b.common_issued - 1) * 100
+        # 사이에 분할·병합이 있으면 주식 수를 같은 기준으로 맞춘다(병합을 소각으로 보지 않게)
+        adj = _split_factor(inp, _q_end(nk)) / _split_factor(inp, _q_end((base_y, 4)))
+        cc = (n_.common_issued * adj / b.common_issued - 1) * 100
         if cc < -0.1:
             F.add("shares_cut_common", "since", f"{base_y}년 말 이후 보통주 발행주식수 변화", f"{abs(cc):.1f}% 감소", cc, "%")
         if b.pref_issued and n_.pref_issued:
-            cp = (n_.pref_issued / b.pref_issued - 1) * 100
+            cp = (n_.pref_issued * adj / b.pref_issued - 1) * 100
             if cp < -0.1:
                 F.add("shares_cut_pref", "since", f"{base_y}년 말 이후 우선주 발행주식수 변화", f"{abs(cp):.1f}% 감소", cp, "%")
         F.add("shares_base_year", "since", "발행주식수 비교 기준 연도", f"{base_y}년 말")
@@ -969,7 +949,6 @@ def _shareholder(c: dict, cur: tuple[int, int], fy_last: int) -> None:
         F.add("bb_end", "now", "자기주식 취득 종료일", fmt.md(bd.end) if bd.end else None)
         F.add("bb_decided", "now", "자기주식 취득 결정일", fmt.md(bd.decided) if bd.decided else None)
         F.add("bb_purpose", "now", "자기주식 취득 목적", bd.purpose)
-        c["buyback"] = bd
 
 
 # ---------------- 잠정실적 발표 반응
@@ -1006,7 +985,7 @@ def _events(c: dict) -> None:
     if len(out) < 4:
         return
     done = [e for e in out if e["ex3"] is not None]
-    hist = [e for e in out[:-1]] if out[-1]["ex3"] is None else out
+    hist = out[:-1]                       # 최근 발표(ev_ex0)를 과거 평균과 비교하므로 늘 뺀다
     F.add("ev_n", "all", f"{out[0]['date'][:4]}년 이후 잠정실적 발표 횟수(최근 제외)", f"{len(hist)}번", len(hist), "n")
     F.add("ev_abs_mean", "all", f"발표일 {inp.index_name} 대비 초과수익률 절댓값 평균", f"{st.mean(abs(e['ex0']) for e in hist):.1f}%p",
           st.mean(abs(e["ex0"]) for e in hist), "%p")
@@ -1033,6 +1012,12 @@ def _events(c: dict) -> None:
 # ---------------- 1년 주가
 def _rel(c: dict) -> None:
     inp, data = c["inp"], c["data"]
+    tail = c.get("key_tail")
+    if tail:              # 52주 최고·최저는 지수와 상관없으니 지수 차트가 빠져도 카드는 둔다
+        data.key_data.append({"label": "12개월 수익률", "value": fmt.spct(tail["r12"]),
+                              "sub": f"{tail['index']} 대비 {fmt.pp(tail['rel12'])}" if tail["rel12"] is not None else "",
+                              "sub_sign": tail["rel12"]})
+        data.key_data.append({"label": "52주 최고", "value": fmt.won(tail["hi"]), "sub": f"최저 {fmt.won(tail['lo'])}"})
     px, ix = inp.px, inp.index_px
     if not px or not ix:
         return
@@ -1051,28 +1036,11 @@ def _rel(c: dict) -> None:
     data.charts["rel"] = {"rows": rows, "index": inp.index_name, "name": c["name"], "events": ev, "title": title,
                           "subtitle": f"{fmt.ym(yr[0][0])} {yr[0][0].day}일=100" + (", 원 표시는 잠정실적 발표일" if ev else ""),
                           "source": "Yahoo Finance"}
-    tail = data.extra.get("key_tail")
-    if tail:
-        data.key_data.append({"label": "12개월 수익률", "value": fmt.spct(tail["r12"]),
-                              "sub": f"{tail['index']} 대비 {fmt.pp(tail['rel12'])}", "sub_sign": tail["rel12"]})
-        data.key_data.append({"label": "52주 최고", "value": fmt.won(tail["hi"]), "sub": f"최저 {fmt.won(tail['lo'])}"})
 
 
 # ---------------- 뉴스·공시 목록
 KEY_DISCLOSURE = ("잠정", "기업설명회", "자기주식", "배당", "합병", "분할", "유상증자", "무상증자", "전환사채", "신주인수권",
                   "공급계약", "투자", "소송", "최대주주", "주식소각", "자산양수도", "영업양수도")
-
-
-def clean_title(t: str, outlet: str | None = None) -> str:
-    """검색 결과 제목 끝의 매체 표기(' - 조선비즈', ' | 한경매거진&북', ':: 공감언론 뉴시스 ::')를 뗀다."""
-    t = re.sub(r"\s*::[^:]*::\s*$", "", t or "").strip()
-    for _ in range(2):
-        m = re.search(r"\s+[-|│ㅣ]\s+([^-|│ㅣ]{1,20})$", t)
-        tail = m.group(1) if m else ""
-        if m and ((outlet and outlet in tail) or re.search(
-                r"일보|신문|뉴스|경제|비즈|매거진|방송|TV|타임스|헤럴드|미디어|저널|데일리|투데이|포스트|&북|\.(?:com|kr|net)", tail)):
-            t = t[:m.start()].strip()
-    return t
 
 
 def _news_disc(c: dict) -> None:

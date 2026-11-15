@@ -57,8 +57,7 @@ def article_chunks(a: Article) -> list[Chunk]:
 
 def annex_chunks(x: Annex, level: str) -> list[Chunk]:
     """별표는 ANNEX_CHUNK자 이하로 자른다. 표는 행 단위로 자르고 조각마다 표 머리 행을 붙인다."""
-    no = x.key.split(":annex-")[-1].replace("-", "의")
-    h = f"[{x.law_name}] [별표 {no}] {x.title}"
+    h = f"[{x.law_name}] [별표 {x.no_label}] {x.title}"
     out = split_annex(x.text, ANNEX_CHUNK)
     return [Chunk(f"{x.key}:c{i}", x.key, x.law_name, level, "lawgo", h, t) for i, t in enumerate(out)]
 

@@ -92,6 +92,16 @@ def test_three_month_and_cumulative_columns():
     assert (op.thstrm_amount, op.thstrm_add_amount) == (1000 * 10 ** 6, -3000 * 10 ** 6)
 
 
+def test_triangle_negative_amounts():
+    # 원문 표는 음수를 △로도 쓴다. 첫 데이터 줄이 모두 △여도 머리글로 세지 않는다.
+    loss = IS_3M.replace("<TD>1,000</TD><TD>(3,000)</TD><TD>900</TD><TD>2,500</TD>",
+                         "<TD>△1,000</TD><TD>△ 3,000</TD><TD>△900</TD><TD>△2,500</TD>")
+    s = _snap(_doc(loss), "11014")
+    op = find_line(s, "operating_income").line
+    assert (op.thstrm_amount, op.thstrm_add_amount) == (-1000 * 10 ** 6, -3000 * 10 ** 6)
+    assert find_line(s, "net_income").line.thstrm_add_amount == 2400 * 10 ** 6
+
+
 def test_separate_statements_fallback_and_euc_kr():
     xml = _doc(IS_CUM).replace("2. 연결재무제표", "2. 재무제표")
     rows, fs = original.parse_statements(xml, "11012", "r")
@@ -119,7 +129,7 @@ async def test_history_fills_from_original_and_derives_quarter(monkeypatch):
 
     async def fake_original(dart, corp, periods, acc):
         assert set(periods) == {(2022, 4), (2023, 1), (2023, 2)}          # API에 없는 최근 분기만
-        return {p: orig[p] for p in periods if p in orig}
+        return {p: orig[p] for p in periods if p in orig}, {}
 
     monkeypatch.setattr(history, "_snap", fake_snap)
     monkeypatch.setattr(history, "from_original", fake_original)
@@ -129,3 +139,28 @@ async def test_history_fills_from_original_and_derives_quarter(monkeypatch):
     assert rows["1Q23"].operating_income == 200 * B
     assert rows["2Q23"].operating_income == 250 * B and rows["2Q23"].net_income == 120 * B   # 반기 누적 - 1분기 누적
     assert rows["3Q23"].operating_income == 150 * B   # API 3분기 스냅숏에 누적만 있으면 반기 누적(원문)을 뺀다
+
+
+async def test_statements_unzips_and_parses_off_the_event_loop(monkeypatch):
+    import asyncio, io, time, zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("20231005000482.xml", _doc(BS + IS_CUM).encode())
+
+    class Dart:
+        async def binary(self, path, **kw):
+            return buf.getvalue()
+    real = original.parse_statements
+
+    def slow(*a):
+        time.sleep(0.3)                    # 수 MB 원문 파싱 흉내
+        return real(*a)
+    monkeypatch.setattr(original, "parse_statements", slow)
+    task = asyncio.create_task(original.statements(Dart(), "20231005000482", "11012"))
+    t0 = time.perf_counter()
+    await asyncio.sleep(0.05)
+    assert time.perf_counter() - t0 < 0.2          # 파싱 중에도 루프가 돈다
+    rows, fs = await task
+    assert fs == "CFS" and any(r["account_nm"] == "자본총계" for r in rows)
+    assert await original.statements(Dart(), "20231005000482", "11012") == (rows, fs)   # 캐시

@@ -16,8 +16,6 @@ from app.core.search import tavily
 from app.domain.dates import parse_published
 from app.domain.sources import TIER1, domain_of
 
-NEWS_MODE = "general_domains"   # "news"로 바꾸면 topic="news"
-
 
 @dataclass
 class SearchHit:
@@ -33,12 +31,8 @@ class SearchHit:
 
 async def search_news(query: str, *, time_range: tavily.TimeRange = "month", max_results: int = 20,
                       http: httpx.AsyncClient | None = None) -> list[SearchHit]:
-    if NEWS_MODE == "news":
-        data = await tavily.search(query, topic="news", time_range=time_range, max_results=max_results, http=http)
-    else:
-        data = await tavily.search(query, topic="general", country="south korea", include_domains=list(TIER1),
-                                   include_published_date=True, time_range=time_range, max_results=max_results,
-                                   http=http)
+    data = await tavily.search(query, topic="general", country="south korea", include_domains=list(TIER1),
+                               include_published_date=True, time_range=time_range, max_results=max_results, http=http)
     return _hits(data)
 
 

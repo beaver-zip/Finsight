@@ -1,35 +1,27 @@
+import { useState } from "react";
 import { X } from "lucide-react";
 import { UploadModal } from "./UploadModal";
-import { TriggerModal } from "./TirggerModal";
+import { TriggerModal } from "./TriggerModal";
 import { CompleteModal } from "./CompleteModal";
 import { StepIndicator } from "./StepIndicator";
-// Modal 컴포넌트가 받을 props 타입 정의
-type ModalProps = {
-  currentStep: number;
-  uploadedFiles: string[];
-  onClose: () => void;
-  onUploadSuccess: (files: string[]) => void;
-  onTriggerSuccess: () => void;
-};
 
-export function Modal({
-  currentStep,
-  uploadedFiles,
-  onClose,
-  onUploadSuccess,
-  onTriggerSuccess,
-}: ModalProps) {
+export function Modal({ onClose }: { onClose: () => void }) {
+  const [currentStep, setCurrentStep] = useState(1);
+  const [uploadedFiles, setUploadedFiles] = useState<string[]>([]);
   const renderStep = () => {
     switch (currentStep) {
       case 1:
-        return <UploadModal onUploadSuccess={onUploadSuccess} />;
-      case 2:
         return (
-          <TriggerModal
-            files={uploadedFiles}
-            onTriggerSuccess={onTriggerSuccess}
+          <UploadModal
+            onUploadSuccess={(files) => {
+              setUploadedFiles(files);
+              setCurrentStep(2);
+            }}
           />
         );
+      case 2:
+        // 목록 갱신은 닫을 때 onClose가 한 번만 한다
+        return <TriggerModal files={uploadedFiles} onTriggerSuccess={() => setCurrentStep(3)} />;
       case 3:
         return <CompleteModal onClose={onClose} />;
       default:

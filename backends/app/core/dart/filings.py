@@ -34,7 +34,10 @@ async def _list(dart: DartClient, *, corp_code: str, bgn: date, end: date, pblnt
             page += 1
         return rows
 
-    return await cached("dart.list", make_key(params), HOUR, fetch)
+    # 키에 날짜 대신 기간 길이를 넣는다: 날이 바뀌어도 같은 키라 점검 때 어제 목록을 쓸 수 있다.
+    # shortcut: 과거 날짜로 끝나는 같은 길이 조회와 키를 함께 쓴다. 과거 시점 조회가 생기면 end를 키에 넣는다
+    key = make_key(corp_code, pblntf_ty, last_reprt_at, (end - bgn).days)
+    return await cached("dart.list", key, HOUR, fetch)
 
 
 def parse_report_name(report_nm: str, acc_mt: int | None) -> tuple[int, str] | None:

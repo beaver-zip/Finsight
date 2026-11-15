@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import defaultdict
 from dataclasses import replace
 from pathlib import Path
 from uuid import uuid4
@@ -26,6 +27,9 @@ from app.deps import AppState, get_state
 log = logging.getLogger(__name__)
 files_router = APIRouter()
 rag_router = APIRouter()
+# 같은 파일 이름의 적재·삭제가 겹치면 메타데이터·벡터·원본이 서로 어긋난다. 이름마다 한 번에 하나만 처리한다.
+# shortcut: 한 프로세스 안에서만 막는다. 워커를 여럿 띄우면 파일 잠금으로 바꿔야 한다.
+_locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 
 class FileName(BaseModel):
@@ -54,8 +58,9 @@ async def upload_pdf(files: list[UploadFile] = File(...)):
     uploaded, rejected = [], []
     for f in files:
         try:
-            data = await f.read()
-            path = uploads.save_file(f.filename or "", data)
+            data = await f.read(uploads.MAX_BYTES + 1)   # 한도를 넘는지만 알면 되므로 그 이상은 읽지 않는다
+            async with _locks[uploads.safe_name(f.filename or "")]:  # 진행 중인 적재가 새 .pending을 옮기지 않게 한다
+                path = uploads.save_file(f.filename or "", data)
             uploaded.append(path.name)
         except uploads.UploadError as e:
             rejected.append({"file": f.filename, "reason": str(e)})
@@ -79,25 +84,30 @@ async def register(req: FileNames, st: AppState = Depends(get_state)):
     done, failed = [], []
     for name in req.file_name:
         try:
-            path = uploads.file_path(name)
-            doc_name = Path(path.name).stem
-            pages = await asyncio.to_thread(uploads.pdf_pages, path)
-            arts = uploads.split_articles(doc_name, pages, file_name=path.name)
-            if not arts:
-                raise uploads.UploadError(f"{path.name}: 텍스트를 읽지 못했습니다(스캔 PDF는 지원하지 않습니다)")
-            previous = uploads.all_docs().get(path.name)
-            vector_name = f"upload:{uuid4()}"
-            # 검색은 메타데이터가 가리키는 세대만 사용한다. 기존 세대는 전환 후 정리한다.
-            chunks = [replace(c, law_name=vector_name) for a in arts for c in article_chunks(a)]
-            try:
-                n = await vec.add(chunks)
-                uploads.put(path.name, doc_name, arts, n, vector_name=vector_name)
-            except BaseException:
-                await _discard_vectors(vec, vector_name)
-                raise
-            if previous:
-                await _discard_vectors(vec, previous.get("vector_name", previous["doc_name"]))
-            done.append({"file_name": path.name, "articles": len(arts), "chunk_count": n})
+            path = uploads.FILES / uploads.safe_name(name)
+            async with _locks[path.name]:
+                pending = uploads.pending_path(path)
+                source = pending if pending.is_file() else uploads.file_path(name)
+                doc_name = Path(path.name).stem
+                pages = await asyncio.to_thread(uploads.pdf_pages, source)
+                arts = uploads.split_articles(doc_name, pages, file_name=path.name)
+                if not arts:
+                    raise uploads.UploadError(f"{path.name}: 텍스트를 읽지 못했습니다(스캔 PDF는 지원하지 않습니다)")
+                previous = uploads.all_docs().get(path.name)
+                vector_name = f"upload:{uuid4()}"
+                # 검색은 메타데이터가 가리키는 세대만 사용한다. 기존 세대는 전환 후 정리한다.
+                chunks = [replace(c, law_name=vector_name) for a in arts for c in article_chunks(a)]
+                try:
+                    n = await vec.add(chunks)
+                    uploads.put(path.name, doc_name, arts, n, vector_name=vector_name)
+                except BaseException:
+                    await _discard_vectors(vec, vector_name)
+                    raise
+                if source is pending:
+                    pending.replace(path)
+                if previous:
+                    await _discard_vectors(vec, previous.get("vector_name", previous["doc_name"]))
+                done.append({"file_name": path.name, "articles": len(arts), "chunk_count": n})
         except uploads.UploadError as e:
             failed.append({"file_name": name, "reason": str(e)})
         except Exception as e:  # noqa: BLE001
@@ -108,9 +118,11 @@ async def register(req: FileNames, st: AppState = Depends(get_state)):
 
 @rag_router.get("/show_files_in_collection", summary="올린 문서 목록")
 async def show_files():
+    # 적재 전이거나 적재에 실패한 파일도 보여 줘야 화면에서 지울 수 있다.
+    docs = {p.name: {} for p in uploads.FILES.glob("*.pdf", case_sensitive=False)} | uploads.all_docs()
     return {"unique_file_name_and_chunk": [{"file_name": k, "chunk_count": v.get("chunk_count", 0),
                                             "articles": len(v.get("articles", []))}
-                                           for k, v in sorted(uploads.all_docs().items())]}
+                                           for k, v in sorted(docs.items())]}
 
 
 @rag_router.post("/delete_objects_from_file_name", summary="올린 문서 삭제")
@@ -119,9 +131,11 @@ async def delete_file(req: FileName, st: AppState = Depends(get_state)):
         name = uploads.safe_name(req.file_name)
     except uploads.UploadError as e:
         raise HTTPException(400, str(e)) from e
-    d = uploads.all_docs().get(name)
-    if d is None:
-        raise HTTPException(404, f"올린 문서가 아닙니다: {req.file_name}")
-    await _vectors(st).delete_doc(d.get("vector_name", d["doc_name"]))
-    uploads.remove(name)
+    async with _locks[name]:
+        d = uploads.all_docs().get(name)
+        if d is None and not (uploads.FILES / name).is_file():
+            raise HTTPException(404, f"올린 문서가 아닙니다: {req.file_name}")
+        if d is not None:
+            await _vectors(st).delete_doc(d.get("vector_name", d["doc_name"]))
+        uploads.remove(name)
     return {"deleted": name}

@@ -19,6 +19,8 @@ from datetime import date
 from functools import lru_cache
 
 from app.domain.binding import substitute, tooltip
+from app.domain.fmt import Units, md
+from app.domain.fmt import signed as sgn      # numf의 인자 이름 signed와 겹치지 않게
 from app.domain.models import Block, Headline, Metric, ReportDraft
 from app.settings import BACKEND_DIR
 
@@ -37,12 +39,6 @@ SECTION_NAMES = {"earnings": "실적", "valuation": "밸류에이션", "cash": "
 
 def esc(s: object) -> str:
     return html.escape(str(s), quote=True)
-
-
-def sgn(x: float, p: int = 1) -> str:
-    if round(x, p) == 0:
-        return f"{0:.{p}f}"
-    return ("+" if x > 0 else "") + f"{x:,.{p}f}"
 
 
 # ---------------- SVG 도구
@@ -162,22 +158,6 @@ def _box(x, y, w, h, anchor):
 
 def _overlap(a, b) -> bool:
     return not (a[2] <= b[0] or b[2] <= a[0] or a[3] <= b[1] or b[3] <= a[1])
-
-
-class Units:
-    """차트 금액 단위: 큰 회사는 조원, 나머지는 억원."""
-
-    def __init__(self, big: bool):
-        self.div, self.word, self.d = (1e12, "조원", 1) if big else (1e8, "억원", 0)
-
-    def v(self, x: float | None) -> float:
-        return (x or 0) / self.div
-
-    def s(self, x: float | None) -> str:
-        return "–" if x is None else f"{x / self.div:,.{self.d}f}"
-
-    def full(self, x: float | None) -> str:
-        return "–" if x is None else f"{x / self.div:,.{self.d}f}{self.word}"
 
 
 # ---------------- 차트
@@ -492,8 +472,6 @@ def ch_events(W: int, sp: dict, u: Units) -> str:
 
 def ch_rel(W: int, sp: dict, u: Units) -> str:
     """최근 1년 주가와 지수(시작일=100)."""
-    from datetime import date as _d
-
     p = P(W)
     H = 220 if p.m else 250
     rows = sp["rows"]
@@ -513,7 +491,7 @@ def ch_rel(W: int, sp: dict, u: Units) -> str:
     b.append(pl(sp_pts, ACC, 2.2))
     dates = [r[0] for r in rows]
     for e in sp.get("events", []):
-        j = min(range(n), key=lambda k: abs((_d.fromisoformat(dates[k]) - _d.fromisoformat(e)).days))
+        j = min(range(n), key=lambda k: abs((date.fromisoformat(dates[k]) - date.fromisoformat(e)).days))
         b.append(f'<circle cx="{sp_pts[j][0]:.1f}" cy="{sp_pts[j][1]:.1f}" r="4" fill="#FFFFFF" stroke="{ACC}" '
                  f'stroke-width="2"><title>{e.replace("-", ".")} 잠정실적 발표</title></circle>')
     for i in range(0, n, max(1, n // (3 if p.m else 4))):
@@ -557,13 +535,13 @@ def figure(fn, sp: dict, u: Units, legend: list | None = None, cls: str = "") ->
 
 
 # ---------------- 표
-def _cell(x) -> tuple[str, str]:
+def _cell(x) -> str:
     if isinstance(x, dict):
         s, v = x.get("sign"), esc(x.get("v", "–"))
         if s is None or round(s, 1) == 0:
-            return v, ""
-        return f'<span class="{"up" if s > 0 else "dn"}">{v}</span>', ""
-    return esc(x), ""
+            return v
+        return f'<span class="{"up" if s > 0 else "dn"}">{v}</span>'
+    return esc(x)
 
 
 def table_html(sp: dict) -> str:
@@ -578,7 +556,7 @@ def table_html(sp: dict) -> str:
         a = f' title="{esc(r["tip"])}"' if r.get("tip") else ""
         cells = []
         for i, x in enumerate(r["cells"]):
-            v, _ = _cell(x)
+            v = _cell(x)
             cl = " ".join(c for c in ("f" if i == focal else "", "sub" if sub else "") if c)
             cells.append(f'<td class="{cl}">{v}</td>' if cl else f"<td>{v}</td>")
         body.append(f'<tr{" class=b" if r.get("bold") else ""}><th scope="row"{" class=sub" if sub else ""}{a}>'
@@ -621,9 +599,7 @@ class Text:
 
 
 def _md(d: str | None) -> str:
-    if not d:
-        return ""
-    return f"{int(d[5:7])}월 {int(d[8:10])}일"
+    return md(d) if d else ""
 
 
 def blocks_html(items: list[Block], tx: Text, cls: str = "blk") -> str:
@@ -657,12 +633,12 @@ def news_html(news: list[dict], disc: list[dict]) -> str:
     if news:
         items = "".join(
             f'<li><span class="no">{n["no"]}</span><div><p class="meta">{esc(n.get("outlet") or "")}, {esc(_md(n.get("date")))}</p>'
-            f'<a href="{_safe_url(n.get("url"))}">{esc(n.get("title") or "")}</a>'
+            f'<a href="{_safe_url(n.get("url"))}" target="_blank" rel="noopener noreferrer">{esc(n.get("title") or "")}</a>'
             + (f'<p class="gist">{esc(n["gist"])}</p>' if n.get("gist") else "") + "</div></li>" for n in news)
         out.append(f'<h3 class="lt">주요 뉴스</h3><ol class="news">{items}</ol>')
     if disc:
         items = "".join(
-            f'<li><p class="meta">{esc(_md(d.get("date")))}</p><a href="{_safe_url(d.get("url"))}">{esc(d.get("title") or "")}</a>'
+            f'<li><p class="meta">{esc(_md(d.get("date")))}</p><a href="{_safe_url(d.get("url"))}" target="_blank" rel="noopener noreferrer">{esc(d.get("title") or "")}</a>'
             + (f'<p class="gist">{esc(d["gist"])}</p>' if d.get("gist") else "") + "</li>" for d in disc)
         out.append(f'<h3 class="lt">최근 공시</h3><ul class="news disc">{items}</ul>')
     return "".join(out)

@@ -1,6 +1,7 @@
 """출처 등급(SOURCE_TIER). 통신사·종합지·경제지 1, 블로그·카페·보도자료 배포 0, 표에 없는 출처 0.5."""
 from __future__ import annotations
 
+import re
 from urllib.parse import urlparse
 
 TIER1 = (
@@ -65,3 +66,19 @@ def outlet_name(url: str) -> str:
         if host == d or host.endswith("." + d):
             return OUTLETS[d]
     return host
+
+
+def clean_name(name: str) -> str:
+    return re.sub(r"\(주\)|㈜|주식회사", "", name or "").strip()
+
+
+def clean_title(t: str, outlet: str | None = None) -> str:
+    """검색 결과 제목 끝의 매체 표기(' - 조선비즈', ' | 한경매거진&북', ':: 공감언론 뉴시스 ::')를 뗀다."""
+    t = re.sub(r"\s*::[^:]*::\s*$", "", t or "").strip()
+    for _ in range(2):
+        m = re.search(r"\s+[-|│ㅣ]\s+([^-|│ㅣ]{1,20})$", t)
+        tail = m.group(1) if m else ""
+        if m and ((outlet and outlet in tail) or re.search(
+                r"일보|신문|뉴스|경제|비즈|매거진|방송|TV|타임스|헤럴드|미디어|저널|데일리|투데이|포스트|&북|\.(?:com|kr|net)", tail)):
+            t = t[:m.start()].strip()
+    return t

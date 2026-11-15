@@ -6,7 +6,6 @@ import logging
 from datetime import date
 
 log = logging.getLogger(__name__)
-INDEX_SOURCES = {"1001": {"name": "KOSPI", "yahoo": "^KS11"}, "2001": {"name": "KOSDAQ", "yahoo": "^KQ11"}}
 
 
 # ---------- 리포트 v2: 일별 종가 이력(yfinance, 분할 반영 종가) ----------
@@ -38,20 +37,16 @@ def _yf_splits(ticker: str) -> list[list]:
 
 
 async def daily_close(ticker: str, start: date) -> list[tuple[date, float]]:
-    """start 이후 일별 종가. 12시간 캐시."""
+    """start 이후 일별 종가. 12시간 캐시(빈 결과는 1시간: 없는 우선주 후보를 리포트마다 다시 묻지 않는다).
+    yfinance 예외는 캐시하지 않고 그대로 올린다(호출한 쪽이 '데이터 없음'과 구분해 장애로 남긴다)."""
     from app.core.cache import get_cache, make_key
 
     cache = get_cache()
     key = make_key(ticker, start.isoformat(), date.today().isoformat())
     hit = await cache.get("px", key)
     if hit is None:
-        try:
-            hit = await asyncio.to_thread(_yf_daily, ticker, start.isoformat())
-        except Exception as e:  # noqa: BLE001
-            log.warning("시세 실패 %s: %s", ticker, e)
-            hit = []
-        if hit:
-            await cache.set("px", key, hit, ttl_s=PX_TTL)
+        hit = await asyncio.to_thread(_yf_daily, ticker, start.isoformat())
+        await cache.set("px", key, hit, ttl_s=PX_TTL if hit else 3600)
     return [(date.fromisoformat(d), v) for d, v in hit]
 
 
@@ -71,6 +66,6 @@ async def splits(ticker: str) -> list[tuple[date, float]]:
 
 
 def pref_candidates(stock_code: str) -> list[str]:
-    """보통주 코드의 끝자리를 바꾼 우선주 후보(예: 005930 → 005935)."""
+    """보통주 코드의 끝자리를 바꾼 우선주 후보(예: 005930 → 005935, 신형 028260 → 02826K)."""
     base = stock_code[:-1]
-    return [base + d for d in ("5", "7", "9")]
+    return [base + d for d in ("5", "7", "9", "K")]

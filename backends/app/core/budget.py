@@ -121,6 +121,14 @@ def request_scope():
         _request_usage.reset(token)
 
 
+def request_root() -> RequestUsage | None:
+    """지금 요청의 최상위 범위(start_request). 하위 request_scope도 같은 값을 돌려준다."""
+    u = _request_usage.get()
+    while u is not None and u.parent is not None:
+        u = u.parent
+    return u
+
+
 def add_request_usage(service: str, tokens: int, cost: float) -> None:
     u = _request_usage.get()
     while u is not None:

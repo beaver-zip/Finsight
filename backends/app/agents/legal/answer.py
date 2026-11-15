@@ -40,8 +40,7 @@ def _blocks(doc: Article | Annex) -> list[str]:
 
 def _title(doc: Article | Annex) -> str:
     if isinstance(doc, Annex):
-        no = doc.key.split(":annex-")[-1].replace("-", "의")
-        return f"{doc.law_name} [별표 {no}] {doc.title}"
+        return f"{doc.law_name} [별표 {doc.no_label}] {doc.title}"
     return doc.display_title
 
 

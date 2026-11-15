@@ -1,5 +1,5 @@
 # 로컬 개발에서는 DB 두 개만 띄우고(docker compose up -d weaviate neo4j) 백엔드·프론트는 직접 실행한다.
-# 자세한 순서는 docs/LOCAL_SETUP.md.
+# 자세한 순서는 README.md와 scripts/setup_local.sh.
 services:
   weaviate:
     image: cr.weaviate.io/semitechnologies/weaviate:1.32.4
@@ -38,35 +38,3 @@ services:
       NEO4J_server_memory_heap_initial__size: "512m"
       NEO4J_server_memory_heap_max__size: "1g"
       NEO4J_server_memory_pagecache_size: "512m"
-
-  backend:
-    build: ./backends
-    ports:
-      - "8000:8000"
-    volumes:
-      - ./backends:/app
-    depends_on:
-      - weaviate
-      - neo4j
-    env_file:
-      - ./backends/.env
-    environment:
-      # 컨테이너 내부에서는 서비스명으로 접속한다. (.env의 localhost 설정을 덮어씀)
-      WEAVIATE_URL: http://weaviate:8080
-      NEO4J_URI: bolt://neo4j:7687
-
-  frontend:
-    build:
-      context: ./frontends/corp-advisor--app
-      dockerfile: Dockerfile
-    ports:
-      - "5173:5173"
-    volumes:
-      - ./frontends/corp-advisor--app:/app
-      - /app/node_modules
-    depends_on:
-      - backend
-    environment:
-      # Vite가 인식하려면 변수명이 반드시 VITE_ 로 시작해야 합니다.
-      # 브라우저에서 호출되는 주소이므로 호스트 기준으로 지정합니다.
-      - VITE_API_URL=http://localhost:8000

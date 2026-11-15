@@ -24,7 +24,12 @@ def test_mcnemar_and_kappa():
     a = {str(i): i < 5 for i in range(20)}
     b = {str(i): True for i in range(20)}
     r = mcnemar(a, b)
-    assert (r["b01"], r["b10"]) == (15, 0) and r["p"] < 0.001
+    assert (r["b01"], r["b10"]) == (15, 0) and r["p"] == pytest.approx(2 / 2**15)
+    # 양측 정확 검정 값(scipy.stats.binomtest와 같다): 3:1은 0.625, 2:2와 불일치 0건은 1.0
+    flip = {"a": True, "b": True, "c": True, "d": False}
+    assert mcnemar({k: not v for k, v in flip.items()}, flip)["p"] == pytest.approx(0.625)
+    assert mcnemar({"a": False, "b": False, "c": True, "d": True}, {"a": True, "b": True, "c": False, "d": False})["p"] == 1.0
+    assert mcnemar({"a": True}, {"a": True})["p"] == 1.0
     assert cohen_kappa([1, 0, 1, 0], [1, 0, 1, 0]) == pytest.approx(1.0)
     assert cohen_kappa([1, 1, 0, 0], [1, 0, 1, 0]) == pytest.approx(0.0)
 

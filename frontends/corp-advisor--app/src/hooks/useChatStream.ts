@@ -1,7 +1,6 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { readChatStream } from "../api/chatStream";
-
-const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+import { BASE_URL } from "../api/baseUrl";
 
 /** 드롭다운: 자동(기본) · 법령 · 기업 · 뉴스. auto가 아니면 백엔드가 의도를 그 값으로 고정한다. */
 export type QueryMode = "auto" | "legal" | "company" | "news";
@@ -39,6 +38,9 @@ export function useChatStream() {
   const [isLoading, setIsLoading] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
+  // 화면을 떠나면 스트림을 끊어 백엔드 그래프 실행(LLM 호출)도 멈추게 한다
+  useEffect(() => () => abortRef.current?.abort(), []);
+
   const resetThread = useCallback(() => {
     abortRef.current?.abort();
     setThreadId(newThreadId());
@@ -70,5 +72,5 @@ export function useChatStream() {
     [threadId],
   );
 
-  return { send, isLoading, resetThread, threadId };
+  return { send, isLoading, resetThread };
 }

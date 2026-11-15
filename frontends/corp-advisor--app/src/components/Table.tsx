@@ -6,9 +6,6 @@ interface ReportTableProps {
   loading: boolean;
   error: string | null;
   data: FinancialRecord[];
-  searchTerm: string;
-  isSearchInput: boolean;
-  onSearchChange: (term: string) => void;
   onClick?: (corp_code: string) => void;
   /** 아직 검색을 실행하지 않은 상태 */
   isIdle?: boolean;
@@ -23,9 +20,6 @@ export function Table({
   loading,
   error,
   data,
-  searchTerm,
-  isSearchInput,
-  onSearchChange,
   onClick,
   isIdle = false,
 }: ReportTableProps) {
@@ -67,19 +61,6 @@ export function Table({
 
   return (
     <div className={shell}>
-      {/* 검색창 */}
-      {isSearchInput && (
-        <div className="border-b border-ink-100 p-3">
-          <input
-            type="text"
-            placeholder="기업명을 검색해주세요."
-            value={searchTerm}
-            onChange={(e) => onSearchChange(e.target.value)}
-            className="w-full rounded-lg border border-ink-200 p-2.5 text-[14px] transition focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100"
-          />
-        </div>
-      )}
-
       <div className="flex items-center justify-between border-b border-ink-100 bg-ink-50/60 px-4 py-2.5">
         <p className="text-[12.5px] font-semibold text-ink-500">
           검색 결과 {data.length}건

@@ -68,15 +68,6 @@ class FinancialSnapshot(BaseModel):
     lines: list[FinancialLine]
 
 
-class SourceRef(BaseModel):
-    rcept_no: str
-    sj_div: str
-    account_id: str
-    account_nm: str
-    column: str                        # "thstrm_add_amount" 등
-    amount: Decimal
-
-
 class Metric(BaseModel):
     id: str                            # "op_margin"
     label: str
@@ -84,8 +75,6 @@ class Metric(BaseModel):
     value: Decimal | None
     unit: Literal["KRW", "%", "x", "%p", "n", "text"]
     formula: str
-    inputs: list[SourceRef] = Field(default_factory=list)
-    note: str | None = None            # "흑자 전환", "연환산", "자본잠식"
     text: str | None = None            # 리포트 v2: 표시 문자열을 계산 단계에서 정한 사실(조원·배·%p 등)
     source: str | None = None          # 리포트 v2: 출처 설명(공시 접수번호·시세 등)
 
@@ -241,6 +230,11 @@ class Annex(BaseModel):
     title: str
     text: str
     related_article: str | None = None
+
+    @property
+    def no_label(self) -> str:
+        """"전자금융거래법시행령:annex-1-2" → "1의2"."""
+        return self.key.split(":annex-")[-1].replace("-", "의")
 
 
 class ArticleHit(BaseModel):

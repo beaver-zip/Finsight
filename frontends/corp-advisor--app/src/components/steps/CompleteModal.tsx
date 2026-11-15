@@ -1,4 +1,4 @@
-// components/steps/Step3_Complete.tsx
+// components/steps/CompleteModal.tsx
 import { CheckCircle2 } from "lucide-react";
 import { Button } from "../Button";
 

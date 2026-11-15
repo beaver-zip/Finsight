@@ -1,12 +1,17 @@
-import type { ComponentProps } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Sparkles } from "lucide-react";
-import type { Message } from "../ChatContext";
+
+export type Message = {
+  id: number;
+  type: "question" | "answer" | "loading";
+  text: string | ReactNode;
+  options?: string[];       // 되묻기 선택지(/chat interrupt)
+};
 
 type BubbleProps = {
   isQuestion: boolean;
-  answerClass?: string;
   msg: Message;
 };
 
@@ -22,7 +27,7 @@ const markdownComponents = {
   ),
 };
 
-export function Bubble({ isQuestion, answerClass, msg }: BubbleProps) {
+export function Bubble({ isQuestion, msg }: BubbleProps) {
   // ---------- 사용자 질문 ----------
   if (isQuestion) {
     return (
@@ -49,9 +54,6 @@ export function Bubble({ isQuestion, answerClass, msg }: BubbleProps) {
           >
             {msg.text}
           </ReactMarkdown>
-          {msg.isStreaming && (
-            <span className="ml-0.5 inline-block h-[1em] w-[2px] translate-y-[2px] animate-pulse bg-brand-500" />
-          )}
       </div>
     );
   };
@@ -65,12 +67,7 @@ export function Bubble({ isQuestion, answerClass, msg }: BubbleProps) {
         <p className="mb-1.5 text-[12px] font-semibold text-ink-400">
           FinSight
         </p>
-        <div
-          className={
-            answerClass ??
-            "rounded-2xl rounded-tl-md border border-ink-200 bg-white px-5 py-4 shadow-card"
-          }
-        >
+        <div className="rounded-2xl rounded-tl-md border border-ink-200 bg-white px-5 py-4 shadow-card">
           {renderBody()}
         </div>
       </div>

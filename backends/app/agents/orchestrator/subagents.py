@@ -5,18 +5,21 @@
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Awaitable, Callable
 
 import httpx
 
 from app.agents.legal.answer import link_of, render_markdown
 from app.agents.legal.tools import short_name
-from app.agents.news.pipeline import NewsConfig, run_pipeline
+from app.agents.news.pipeline import run_pipeline
 from app.core.dart import filings as dart_filings
 from app.core.dart.client import DartClient
 from app.core.law.corpus import load_corpus
 from app.domain.binding import display
+from app.domain.dates import KST
 from app.domain.models import (Citation, Claim, CompanyReport, CorpProfile, LegalAnswer, Metric, NewsItem,
                                SubResult)
 
@@ -89,9 +92,33 @@ def company_digest(rep: CompanyReport, limit_facts: int = 160) -> str:
     return "\n".join(lines)
 
 
-async def run_company(instruction: str, corp: CorpProfile, build: ReportBuilder) -> tuple[SubResult, EvidencePart]:
+NEWS_SHIFT = 100      # 뉴스 과업 기사(n1~)와 겹치지 않을 만큼 큰 수
+
+
+def shift_news_ids(rep: CompanyReport, by: int = NEWS_SHIFT) -> CompanyReport:
+    """리포트 기사 id를 n1 → n101로 민다. 기사 목록, 본문 블록의 [n1]·[n1, n2] 표기, news_ids를 함께 바꾼다."""
+    new = lambda nid: f"n{int(nid[1:]) + by}"
+    mark = lambda m: re.sub(r"n(\d+)", lambda k: new(k.group(0)), m.group(0))
+
+    def walk(v, key=None):
+        if key == "news_ids":
+            return [new(x) for x in v]
+        if isinstance(v, dict):
+            return {k: walk(x, k) for k, x in v.items()}
+        if isinstance(v, list):
+            return [walk(x) for x in v]
+        return re.sub(r"\[n\d+(?:\s*,\s*n\d+)*\]", mark, v) if isinstance(v, str) else v
+    d = rep.model_dump(mode="json")
+    d["news"] = [{**n, "id": new(n["id"])} for n in d["news"]]
+    d["draft"] = walk(d["draft"]) if d["draft"] else None
+    return CompanyReport.model_validate(d)
+
+
+async def run_company(corp: CorpProfile, build: ReportBuilder, *, shift_news: bool = False) -> tuple[SubResult, EvidencePart]:
     out = await build(corp.corp_code)
     rep = CompanyReport.model_validate(out["json"])
+    if shift_news:      # 같은 질문의 뉴스 과업도 n1~을 쓴다. 리포트(캐시) 기사와 겹치면 출처·검증 본문이 바뀐다
+        rep = shift_news_ids(rep)
     if rep.filing is None or not rep.metrics:
         return (SubResult(agent="company", content="", error=f"{corp.corp_name}의 정기보고서·재무 자료가 없다"),
                 EvidencePart())
@@ -117,15 +144,13 @@ def news_digest(corp: CorpProfile, items: list[NewsItem], note: str | None) -> s
     return "\n".join(lines)
 
 
-async def run_news(instruction: str, corp: CorpProfile, *, dart: DartClient, http: httpx.AsyncClient,
-                   config: NewsConfig | None = None) -> tuple[SubResult, EvidencePart]:
-    disclosures = await dart_filings.disclosures(dart, corp.corp_code)
-    res = await run_pipeline(corp, disclosures, http=http, config=config or NewsConfig())
-    by_url = {c.url: c for c in res.candidates}
-    texts = {n.id: by_url[n.url].text for n in res.items if n.url in by_url and by_url[n.url].text}
+async def run_news(corp: CorpProfile, *, dart: DartClient, http: httpx.AsyncClient) -> tuple[SubResult, EvidencePart]:
+    # 리포트 get_disclosures와 같은 KST 날짜여야 공시 목록이 같아 run_pipeline 단일 실행을 함께 쓴다
+    disclosures = await dart_filings.disclosures(dart, corp.corp_code, today=datetime.now(KST).date())
+    res = await run_pipeline(corp, disclosures, http=http)
     cites = [Citation(kind="news", id=n.id, label=n.title, url=n.url) for n in res.items]
     return (SubResult(agent="news", content=news_digest(corp, res.items, res.note), citations=cites),
-            EvidencePart(news=res.items, news_text=texts))
+            EvidencePart(news=res.items, news_text=res.texts))
 
 
 def merge_evidence(parts: list[Any]):
