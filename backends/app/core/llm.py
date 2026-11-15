@@ -14,6 +14,7 @@ from typing import Any, Callable, Literal, TypeVar
 from anthropic import AsyncAnthropic
 from anthropic.lib._parse._transform import transform_schema
 from anthropic.types import Message
+from langsmith import traceable
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from app.core import budget
@@ -42,14 +43,6 @@ ROLE_OVERRIDE: contextvars.ContextVar[dict[str, str]] = contextvars.ContextVar("
 
 def _effort(task: str, effort: Effort) -> Effort:
     return EFFORT_OVERRIDE.get().get(task, effort)  # type: ignore[return-value]
-
-try:  # LangSmith 트레이스에 SDK 직접 호출을 넣는다
-    from langsmith import traceable
-except Exception:  # pragma: no cover
-    def traceable(*a, **k):  # type: ignore
-        def deco(f):
-            return f
-        return deco if not (a and callable(a[0])) else a[0]
 
 
 class StructuredOutputError(RuntimeError):
