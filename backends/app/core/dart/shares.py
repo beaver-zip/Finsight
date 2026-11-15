@@ -35,14 +35,14 @@ class Shares:
 async def _json(dart: DartClient, endpoint: str, corp_code: str, year: int, rc: str) -> list[dict] | None:
     cache = get_cache()
     key = f"{endpoint}:{corp_code}:{year}:{rc}"
-    hit = await cache.get("dart.sh", key)
+    hit = await cache.get("dart.sh.v2", key)   # v2: 예전 코드가 만료 없이 저장한 빈 응답을 읽지 않는다
     if hit is not None:
         return hit or None
     try:
         rows = (await dart.json(endpoint, corp_code=corp_code, bsns_year=str(year), reprt_code=rc)).get("list", [])
     except DartNoData:
         rows = []
-    await cache.set("dart.sh", key, rows, ttl_s=None if rows else 300)   # 제출 직후 013이면 곧 다시 읽는다
+    await cache.set("dart.sh.v2", key, rows, ttl_s=None if rows else 300)   # 제출 직후 013이면 곧 다시 읽는다
     return rows or None
 
 
