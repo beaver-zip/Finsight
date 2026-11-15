@@ -60,3 +60,15 @@ async def test_failed_service_body_is_not_cached(monkeypatch, target, fixture):
         await c.service(target, MST="1")
     assert await c.service(target, MST="1") == good
     assert await c.service(target, MST="1") == good and bodies == []
+
+
+@pytest.mark.asyncio
+async def test_failed_service_body_cached_by_old_code_is_refetched(monkeypatch):
+    # 고치기 전 코드가 7일 캐시해 둔 실패 응답은 hit로 돌려주지 않고 다시 받는다
+    from app.core.cache import get_cache, make_key
+
+    good = (Path(__file__).parent / "fixtures" / "lawgo" / "law_act.xml").read_text()
+    c = _law_client(monkeypatch, lambda request: httpx.Response(200, text=good))
+    await get_cache().set("law", make_key("lawService.do", sorted({"target": "law", "MST": "1"}.items())),
+                          "<Law>사용자 정보 검증에 실패하였습니다.</Law>", ttl_s=7 * 86400)
+    assert await c.service("law", MST="1") == good

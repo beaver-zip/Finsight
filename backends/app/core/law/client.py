@@ -64,12 +64,13 @@ class LawClient:
         """응답 XML(OC를 지운 것). 같은 요청은 ttl 동안 캐시한다."""
         cache = get_cache()
         key = make_key(path, sorted(params.items()))
+        # 키·권한 오류도 200으로 온다. 검색은 resultCode, 본문 조회는 parser가 읽는 요소가 있어야 캐시한다.
+        # 예전 코드가 캐시한 실패 응답도 같은 기준으로 걸러 다시 받는다.
+        need = "<resultCode>00</resultCode>" if path == "lawSearch.do" else _ROOT.get(params.get("target"))
         hit = await cache.get("law", key)
-        if hit is not None:
+        if hit is not None and (not need or need in hit):
             return hit
         text = await self._get(path, params)
-        # 키·권한 오류도 200으로 온다. 검색은 resultCode, 본문 조회는 parser가 읽는 요소가 있어야 캐시한다.
-        need = "<resultCode>00</resultCode>" if path == "lawSearch.do" else _ROOT.get(params.get("target"))
         if need and need not in text:
             raise LawApiError(f"법령 API {path} 실패 응답(LAW_OC 키·등록 IP 확인)")
         await cache.set("law", key, text, ttl_s=ttl)
