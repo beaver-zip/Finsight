@@ -14,6 +14,7 @@ from datetime import date
 from lxml import etree
 
 from app.domain.annex_table import Vocab, convert
+from app.domain.citations import law_key as key_name
 from app.domain.models import Annex, Article, Paragraph
 
 CIRCLED = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳"
@@ -39,10 +40,6 @@ class LawDoc:
     articles: list[Article] = field(default_factory=list)
     annexes: list[Annex] = field(default_factory=list)
     delegations: list[dict] = field(default_factory=list)   # 위임법령 조회 API 결과(parse_delegations)
-
-
-def key_name(name: str) -> str:
-    return re.sub(r"\s+", "", name)
 
 
 def article_key(law_key: str, no: int, branch: int = 0) -> str:
