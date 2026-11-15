@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -26,6 +27,9 @@ router = APIRouter()
 WEEK = 7 * 86_400
 HOUR = 3_600                # 외부 수집이 일부 실패한 리포트: 장애가 풀리면 다시 만든다
 VERSION = "v2.4"            # v2.4: 검증을 통과한 완성본만 캐시
+# 장애로 빠졌을 수 있는 자료: collect 하위 갈래, guarded 노드 예외("news: ConnectTimeout: ...").
+# 법령 서브그래프 미연결 같은 설정 문제는 예외 이름이 없어 걸리지 않는다
+_TRANSIENT = re.compile(r"collect\.|(news|disclosures|regulatory): [A-Za-z_]\w*: ")
 
 
 def _to_report(out: dict, cost: float | None) -> CompanyReport:
@@ -83,7 +87,7 @@ async def build_report(st: AppState, corp_code: str) -> dict:
         rep = _to_report(out, round(usage.cost_usd, 5))
         value = {"html": out.get("html", ""), "json": rep.model_dump(mode="json")}
         if _cacheable(out, usage):
-            partial = any(e.startswith("collect.") for e in out.get("errors", []))
+            partial = any(_TRANSIENT.match(e) for e in out.get("errors", []))
             await cache.set("report", key, value, ttl_s=HOUR if partial else WEEK)
         return value
 
