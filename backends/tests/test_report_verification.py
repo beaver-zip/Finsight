@@ -232,3 +232,47 @@ def test_style_only_issues_keep_text_without_warning_and_are_cached(scenario):
         html = client.get("/report/test").text
     assert "제거할 문장" in html and "남길 문장" in html and "검증을 통과하지 못한" not in html
     assert scenario.verify.await_count == 1 + nodes.MAX_REVISIONS
+
+
+@pytest.mark.parametrize("where", ["answer", "expand"])
+@pytest.mark.asyncio
+async def test_report_legal_subgraph_failure_is_cached_briefly(scenario, monkeypatch, temp_cache, where):
+    import httpx
+
+    from app.agents.legal import graph as lg
+    from app.domain.models import Article, ArticleHit, LegalAnswer
+
+    hit = ArticleHit(article=Article(key="전자금융거래법:21", law_id="1", law_name="전자금융거래법", level="법률",
+                                     no=21, title="안전성의 확보의무"), score=0.99)
+
+    async def down(*args, **kwargs):
+        raise httpx.ReadTimeout("down")
+
+    async def search_law(q, **kwargs):
+        return [hit]
+
+    async def no_citations(*args, **kwargs):
+        return []
+
+    async def structured(model, messages, **kwargs):
+        if model is lg.Sufficiency:
+            return lg.Sufficiency(sufficient=True, missing=[])
+        return lg.LegalQueryPlan(queries=["q"], as_of=None)
+
+    async def answered(*args, **kwargs):
+        return LegalAnswer(answerable=True), {}
+
+    async def rerank(q, docs):
+        return [0.99 for _ in docs]
+
+    monkeypatch.setattr(lg, "rerank", rerank)
+    monkeypatch.setattr(lg.llm, "structured", structured)
+    monkeypatch.setattr(lg, "build_answer", down if where == "answer" else answered)
+    tools = NS(search_law=search_law, expand_citations=down if where == "expand" else no_citations)
+    monkeypatch.setattr(nodes, "regulatory_check", REAL_REGULATORY)
+    monkeypatch.setattr(nodes, "triggers", lambda state: ["financial"])
+    scenario.st.legal_runner = lg.make_runner(lg.build_legal_graph(), tools)
+    scenario.st.company_graph = build_company_graph()
+    out = await report.build_report(scenario.st, "test")
+    assert out["json"]["errors"] == ["regulatory: ReadTimeout: down"]
+    assert _report_ttl(temp_cache) == pytest.approx(report.HOUR)

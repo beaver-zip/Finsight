@@ -32,7 +32,7 @@ MAX_REVISIONS = 2
 SANCTION_WORDS = ("제재", "과징금", "과태료", "영업정지", "업무정지", "인가", "등록취소")
 FINANCIAL_QUESTION = "금융회사에 적용되는 전자금융거래법상 주요 의무는 무엇인가?"
 
-LegalRunner = Callable[[str], Awaitable[tuple[LegalAnswer, dict[str, str]]]]
+LegalRunner = Callable[[str], Awaitable[tuple[LegalAnswer, dict[str, str], list[str]]]]
 
 
 def _deps(config: RunnableConfig) -> dict[str, Any]:
@@ -156,11 +156,13 @@ async def regulatory_check(state: CompanyState, config: RunnableConfig) -> dict:
     for q in questions:
         _progress("company.regulatory", q)
     results = await asyncio.gather(*(runner(q) for q in questions))   # 러너는 호출마다 상태를 새로 만든다
-    findings, texts = [], {}
-    for q, (answer, t) in zip(questions, results):
+    findings, texts, errors = [], {}, []
+    for q, (answer, t, errs) in zip(questions, results):
         findings.append(LegalFinding(question=q, answer=answer))
         texts.update(t)
-    return {"triggers": trig, "regulatory": findings, "legal_texts": texts}
+        # "legal.answer: ReadTimeout: ..." → "regulatory: ReadTimeout: ...": 리포트 캐시가 장애로 보고 1시간만 둔다
+        errors += [f"regulatory: {e.split(': ', 1)[-1]}" for e in errs]
+    return {"triggers": trig, "regulatory": findings, "legal_texts": texts, "errors": errors}
 
 
 # ---------- 본문·검증·재작성 ----------

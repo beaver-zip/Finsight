@@ -58,7 +58,7 @@ def test_clarification_interrupts_then_resume_streams_final(monkeypatch):
 
     async def runner(q):
         await sub.ainvoke({"q": q}, config={"configurable": {}})
-        return ans, {"전자금융거래법시행령:11-4": "④ …별표 1과 같다."}
+        return ans, {"전자금융거래법시행령:11-4": "④ …별표 1과 같다."}, []
     saver = InMemorySaver()
     st = NS(chat_graph=G.build_orchestrator(saver), dart=object(), http=object(), legal_runner=runner)
     with client_for(st) as c:
