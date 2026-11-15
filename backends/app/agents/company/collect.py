@@ -49,6 +49,13 @@ class Collected:
     errors: list[str] = field(default_factory=list)
 
 
+def _note_failures(name: str, got: list, errors: list[str]) -> None:
+    """gather(return_exceptions=True)에서 버리는 예외를 errors에 한 줄로 남긴다."""
+    bad = [e for e in got if isinstance(e, Exception)]
+    if bad:
+        errors.append(f"collect.{name}: {len(bad)}건 실패, 첫 오류 {type(bad[0]).__name__}: {bad[0]}")
+
+
 async def _safe(name: str, coro, default, errors: list[str]):
     try:
         return await coro
@@ -96,6 +103,12 @@ async def collect(dart: DartClient, http: httpx.AsyncClient, corp: CorpProfile, 
     out.quarters, out.px, out.index_px, out.splits, out.prelim, out.buybacks, out.peers = \
         hist.quarters, px, ix, sp, prelim, bb, peers
     out.prelim_firsts = first_per_quarter(pfl)
+    if tk and not px:       # daily_close는 실패하면 스스로 []를 돌려준다
+        err.append("collect.price: 시세 없음")
+    if tk and not ix:
+        err.append("collect.index: 시세 없음")
+    if hist.errors:
+        err.append(f"collect.history: {len(hist.errors)}개 분기 실패, 첫 오류 {hist.errors[0]}")
     if hist.snapshots:
         latest = hist.snapshots.get((y, q)) or hist.snapshots[max(hist.snapshots)]
         out.industry = industry_group(latest, corp.induty_code)
@@ -107,11 +120,13 @@ async def collect(dart: DartClient, http: httpx.AsyncClient, corp: CorpProfile, 
     async def shares_all():
         got = await asyncio.gather(*(share_counts(dart, code, yy, RC[qq]) for yy, qq in periods),
                                    return_exceptions=True)
+        _note_failures("shares", got, err)
         return {p: s for p, s in zip(periods, got) if isinstance(s, Shares)}
 
     async def dividends_all():
         got = await asyncio.gather(*(dividend(dart, code, yy) for yy in range(fy_last - 2, fy_last + 1)),
                                    return_exceptions=True)
+        _note_failures("dividends", got, err)
         return {d.year: d for d in got if isinstance(d, Dividend)}
 
     async def segments_all():
@@ -125,6 +140,7 @@ async def collect(dart: DartClient, http: httpx.AsyncClient, corp: CorpProfile, 
         out.segment_source = SOURCES[method]
         got = await asyncio.gather(*(segment_cumulative(http, hist.snapshots[p].rcept_no, method)
                                      for p in seg_periods[:-1]), return_exceptions=True)
+        _note_failures("segments", got, err)
         res = {p: s[0] for p, s in zip(seg_periods[:-1], got) if isinstance(s, tuple)}
         res[seg_periods[-1]] = cum
         return res

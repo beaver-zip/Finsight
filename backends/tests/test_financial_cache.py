@@ -150,6 +150,23 @@ async def test_report_list_outage_keeps_available_financial_history(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_quarter_outage_keeps_other_quarters_and_is_reported(monkeypatch):
+    from app.core.dart.client import DartLimit
+
+    monkeypatch.setattr(history.original, "periodic_reports", AsyncMock(return_value={}))
+
+    async def json(endpoint, **params):
+        if params["reprt_code"] == "11012":
+            raise DartLimit("020", "limit")
+        return {"list": rows()}
+
+    dart = NS(json=AsyncMock(side_effect=json))
+    result = await history.quarterly_history(dart, "corp", (2024, 2), first_year=2024, use_original=False)
+    assert result.quarters[0].revenue == Decimal("100") and result.quarters[1].revenue is None
+    assert result.errors == ["2Q24: DartLimit: OpenDART 020: limit"]
+
+
+@pytest.mark.asyncio
 async def test_cumulative_reuses_supplied_snapshots_without_external_calls(monkeypatch):
     dart = NS(json=AsyncMock(return_value={"list": rows()}))
     snap = await financials.get_snapshot(dart, "corp", 2024, "11013")

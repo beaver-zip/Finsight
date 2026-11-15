@@ -86,6 +86,7 @@ class QRow:
 class History:
     quarters: list[QRow]
     snapshots: dict[tuple[int, int], FinancialSnapshot] = field(default_factory=dict)
+    errors: list[str] = field(default_factory=list)      # 장애로 비어 있는 분기("2Q24: DartLimit: ...")
 
     def by_key(self) -> dict[str, QRow]:
         return {r.key: r for r in self.quarters}
@@ -93,12 +94,7 @@ class History:
 
 async def _snap(dart: DartClient, corp_code: str, y: int, q: int, acc_mt: int | None,
                 *, expected_rcept_no: str | None = None) -> FinancialSnapshot | None:
-    try:
-        return await dart_fin.get_snapshot(dart, corp_code, y, RC[q], acc_mt=acc_mt,
-                                           expected_rcept_no=expected_rcept_no)
-    except Exception as e:  # noqa: BLE001
-        log.info("스냅샷 실패 %s %s %s: %s", corp_code, y, RC[q], e)
-        return None
+    return await dart_fin.get_snapshot(dart, corp_code, y, RC[q], acc_mt=acc_mt, expected_rcept_no=expected_rcept_no)
 
 
 async def _reports(dart: DartClient, corp_code: str, first_year: int, acc_mt: int | None) -> dict:
@@ -140,12 +136,17 @@ async def quarterly_history(dart: DartClient, corp_code: str, last: tuple[int, i
     """
     periods = quarters_between((first_year, 1), last)
     reports = await _reports(dart, corp_code, first_year, acc_mt) if periods else {}
-    snaps_list = await asyncio.gather(*(_snap(dart, corp_code, y, q, acc_mt,
-                                            expected_rcept_no=reports.get((y, RC[q]))) for y, q in periods))
-    snaps = {p: s for p, s in zip(periods, snaps_list) if s is not None}
+    got = await asyncio.gather(*(_snap(dart, corp_code, y, q, acc_mt, expected_rcept_no=reports.get((y, RC[q])))
+                                 for y, q in periods), return_exceptions=True)
+    snaps = {p: s for p, s in zip(periods, got) if isinstance(s, FinancialSnapshot)}
     if use_original:
         recent = set(periods[-ORIGINAL_QUARTERS:])
         snaps.update(await from_original(dart, corp_code, [p for p in periods if p in recent and p not in snaps], acc_mt))
+    # 한 분기 장애는 그 분기만 비우고, 원문으로도 못 채웠으면 '데이터 없음'과 구분되게 errors로 올린다
+    errors = [f"{qkey(*p)}: {type(e).__name__}: {e}" for p, e in zip(periods, got)
+              if isinstance(e, Exception) and p not in snaps]
+    for e in errors:
+        log.warning("스냅샷 실패 %s %s", corp_code, e)
     rows = []
     for (y, q) in periods:
         s = snaps.get((y, q))
@@ -168,7 +169,7 @@ async def quarterly_history(dart: DartClient, corp_code: str, last: tuple[int, i
     # 앞쪽의 빈 분기(상장 전 등)는 잘라 낸다
     while rows and rows[0].revenue is None and rows[0].equity_owners is None:
         rows.pop(0)
-    return History(quarters=rows, snapshots=snaps)
+    return History(quarters=rows, snapshots=snaps, errors=errors)
 
 
 async def cumulative_items(dart: DartClient, corp_code: str, periods: list[tuple[int, int]], *,
@@ -178,8 +179,12 @@ async def cumulative_items(dart: DartClient, corp_code: str, periods: list[tuple
     reports = await _reports(dart, corp_code, min(y for y, _ in missing), acc_mt) if missing else {}
     out = {}
     for y, q in periods:
-        s = (snapshots or {}).get((y, q)) or await _snap(dart, corp_code, y, q, acc_mt,
-                                                      expected_rcept_no=reports.get((y, RC[q])))
+        s = (snapshots or {}).get((y, q))
+        if s is None:
+            try:
+                s = await _snap(dart, corp_code, y, q, acc_mt, expected_rcept_no=reports.get((y, RC[q])))
+            except Exception as e:  # noqa: BLE001
+                log.info("스냅샷 실패 %s %s %s: %s", corp_code, y, RC[q], e)
         if s is None:
             continue
         row = {it: cum_value(s, it) for it in CASH_ITEMS}

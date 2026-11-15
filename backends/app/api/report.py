@@ -24,6 +24,7 @@ from app.domain.models import Citation, CompanyReport
 log = logging.getLogger(__name__)
 router = APIRouter()
 WEEK = 7 * 86_400
+HOUR = 3_600                # 외부 수집이 일부 실패한 리포트: 장애가 풀리면 다시 만든다
 VERSION = "v2.4"            # v2.4: 검증을 통과한 완성본만 캐시
 
 
@@ -82,7 +83,8 @@ async def build_report(st: AppState, corp_code: str) -> dict:
         rep = _to_report(out, round(usage.cost_usd, 5))
         value = {"html": out.get("html", ""), "json": rep.model_dump(mode="json")}
         if _cacheable(out, usage):
-            await cache.set("report", key, value, ttl_s=WEEK)
+            partial = any(e.startswith("collect.") for e in out.get("errors", []))
+            await cache.set("report", key, value, ttl_s=HOUR if partial else WEEK)
         return value
 
 
