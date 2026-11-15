@@ -1,6 +1,7 @@
 """Finsight v2 API. 공유 클라이언트와 컴파일된 그래프는 lifespan에서 한 번 만든다."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -14,11 +15,12 @@ from app.agents.legal.graph import build_legal_graph, make_runner
 from app.agents.legal.tools import LawTools
 from app.agents.orchestrator.graph import build_orchestrator, serializer
 from app.api import admin, chat, documents, financial, report
+from app.core import reranker
 from app.core.cache import get_cache
 from app.core.dart.client import DartClient
 from app.core.search import tavily
 from app.deps import AppState
-from app.settings import BACKEND_DIR, get_settings
+from app.settings import get_settings
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -30,14 +32,12 @@ for _name in ("httpx", "httpcore", "httpx2"):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     get_settings()
-    cache = get_cache()
-    await cache.purge_expired()
     http = httpx.AsyncClient(timeout=10, follow_redirects=True)
     await tavily.init_free_credits(http)
     law_tools = await _open_law_tools()
+    warm = asyncio.create_task(reranker.warmup()) if law_tools else None   # 시작을 막지 않는다
     runner = make_runner(build_legal_graph(), law_tools) if law_tools else None
-    db = get_settings().sqlite_path
-    db = db if db.is_absolute() else BACKEND_DIR / db
+    db = get_settings().resolve(get_settings().sqlite_path)
     db.parent.mkdir(parents=True, exist_ok=True)
     conn = await aiosqlite.connect(str(db))                  # 채팅 단기 메모리(thread_id별 대화)
     saver = AsyncSqliteSaver(conn, serde=serializer())
@@ -46,6 +46,8 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        if warm:
+            warm.cancel()
         await conn.close()
         if law_tools:
             await law_tools.close()
