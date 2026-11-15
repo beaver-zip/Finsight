@@ -185,7 +185,7 @@ function Chatbot() {
       </header>
 
       {/* 열 때마다 새로 마운트되므로 Modal의 단계는 1부터 시작한다 */}
-      {isModalOpen && <Modal onClose={closeModal} />}
+      {isModalOpen && <Modal onClose={closeModal} onRegistered={refetchCollectionFiles} />}
 
       {hasMessages ? (
         <div className="flex min-h-0 flex-1 flex-col">

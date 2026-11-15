@@ -5,7 +5,7 @@ import { TriggerModal } from "./TriggerModal";
 import { CompleteModal } from "./CompleteModal";
 import { StepIndicator } from "./StepIndicator";
 
-export function Modal({ onClose }: { onClose: () => void }) {
+export function Modal({ onClose, onRegistered }: { onClose: () => void; onRegistered: () => void }) {
   const [currentStep, setCurrentStep] = useState(1);
   const [uploadedFiles, setUploadedFiles] = useState<string[]>([]);
   const renderStep = () => {
@@ -20,8 +20,15 @@ export function Modal({ onClose }: { onClose: () => void }) {
           />
         );
       case 2:
-        // 목록 갱신은 닫을 때 onClose가 한 번만 한다
-        return <TriggerModal files={uploadedFiles} onTriggerSuccess={() => setCurrentStep(3)} />;
+        return (
+          <TriggerModal
+            files={uploadedFiles}
+            onTriggerSuccess={() => {
+              setCurrentStep(3);
+              onRegistered(); // 적재 중에 모달을 닫았어도 끝난 뒤 목록을 다시 읽는다
+            }}
+          />
+        );
       case 3:
         return <CompleteModal onClose={onClose} />;
       default:
