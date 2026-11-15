@@ -42,6 +42,15 @@ test("interrupt and fatal errors end the stream; trailing events are ignored", a
   }
 });
 
+test("U+2028/U+2029 inside JSON data do not split the data line", async () => {
+  const h = handlers();
+  const markdown = "첫 줄 둘째 줄 끝";
+  // 백엔드 json.dumps(ensure_ascii=False)는 U+2028/U+2029를 이스케이프하지 않는다
+  const text = `event: final\ndata: {"answer":{"markdown":"${markdown}","citations":[]}}\n\n`;
+  await readChatStream(stream([encoder.encode(text)]), h, signal());
+  assert.deepEqual(h.calls, [["final", { markdown, citations: [] }]]);
+});
+
 test("user cancellation is not an early-EOF error", async () => {
   const ctrl = new AbortController();
   ctrl.abort();
