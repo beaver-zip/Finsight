@@ -19,7 +19,7 @@ async def empty(state, config):
 async def test_news_reuses_disclosures_fetched_by_disclosure_node(monkeypatch):
     found = [Disclosure(rcept_no="r", report_nm="주요사항보고서", rcept_dt=date(2026, 11, 1), pblntf_ty="B")]
     listing = AsyncMock(return_value=found)
-    pipeline = AsyncMock(return_value=NS(items=[], note=None, candidates=[]))
+    pipeline = AsyncMock(return_value=NS(items=[], note=None, candidates=[], texts={"n1": "본문"}, errors=[]))
     monkeypatch.setattr(nodes.dart_filings, "disclosures", listing)
     monkeypatch.setattr(nodes, "run_pipeline", pipeline)
     for name in ("get_filing", "collect_data", "analyze_data", "regulatory_check"):
@@ -28,6 +28,7 @@ async def test_news_reuses_disclosures_fetched_by_disclosure_node(monkeypatch):
                                               config={"configurable": {"dart": None, "http": None}})
     assert out["disclosures"] == found
     assert listing.await_count == 1 and pipeline.await_args.args[1] == found
+    assert not [e for e in out["errors"] if e.startswith("news:")] and out["news_text"] == {"n1": "본문"}
 
 
 @pytest.mark.asyncio
