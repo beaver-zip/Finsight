@@ -197,9 +197,9 @@ def build_legal_graph(checkpointer=None):
 
 
 def make_runner(graph, tools: LawTools, cfg: LegalConfig | None = None):
-    """기업 리포트의 규제 노드가 쓰는 LegalRunner: 질문 → (LegalAnswer, 조문 key → 본문)."""
-    async def run(question: str) -> tuple[LegalAnswer, dict[str, str]]:
+    """기업 리포트의 규제 노드와 대화의 법령 과업이 쓰는 LegalRunner: 질문 → (LegalAnswer, 조문 key → 본문, 노드 오류)."""
+    async def run(question: str) -> tuple[LegalAnswer, dict[str, str], list[str]]:
         out: dict[str, Any] = await graph.ainvoke({"question": question, "errors": []},
                                                   config={"configurable": {"law_tools": tools, "legal_config": cfg}})
-        return out.get("answer") or LegalAnswer(answerable=False), out.get("texts") or {}
+        return out.get("answer") or LegalAnswer(answerable=False), out.get("texts") or {}, out.get("errors") or []
     return run

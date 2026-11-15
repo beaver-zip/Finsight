@@ -50,7 +50,7 @@ async def test_questions_and_legal_runs_are_concurrent_and_keep_order(monkeypatc
     run = barrier(3)
 
     async def runner(q):
-        return LegalAnswer(answerable=False, notes=[await run(q)]), {q: "조문"}
+        return LegalAnswer(answerable=False, notes=[await run(q)]), {q: "조문"}, []
 
     monkeypatch.setattr(nodes.llm, "structured", structured)
     out = await nodes.regulatory_check(triggered_state(), {"configurable": {"legal_runner": runner}})

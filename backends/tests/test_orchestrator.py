@@ -22,7 +22,7 @@ LEGAL_ANS = LegalAnswer(answerable=True, points=[
 
 
 async def fake_runner(q):
-    return LEGAL_ANS, {"전자금융거래법시행령:11-4": "④ …별표 1과 같다.", "전자금융거래법시행령:annex-1": "…"}
+    return LEGAL_ANS, {"전자금융거래법시행령:11-4": "④ …별표 1과 같다.", "전자금융거래법시행령:annex-1": "…"}, []
 
 
 def _cfg(tid, **kw):

@@ -23,7 +23,7 @@ from app.domain.dates import KST
 from app.domain.models import (Citation, Claim, CompanyReport, CorpProfile, LegalAnswer, Metric, NewsItem,
                                SubResult)
 
-LegalRunner = Callable[[str], Awaitable[tuple[LegalAnswer, dict[str, str]]]]
+LegalRunner = Callable[[str], Awaitable[tuple[LegalAnswer, dict[str, str], list[str]]]]
 ReportBuilder = Callable[[str], Awaitable[dict]]       # corp_code → {"html", "json"(CompanyReport)}
 
 
@@ -62,7 +62,7 @@ def legal_citations(keys: list[str]) -> list[Citation]:
 async def run_legal(instruction: str, runner: LegalRunner | None) -> tuple[SubResult, EvidencePart]:
     if runner is None:
         return SubResult(agent="legal", content="", error="법령 검색 DB(Weaviate·Neo4j)가 연결되지 않았다"), EvidencePart()
-    ans, texts = await runner(instruction)
+    ans, texts, _ = await runner(instruction)
     if not ans.answerable:          # 거절이면 합성이 그 조문을 근거로 쓰지 않도록 내용·인용을 비운다
         return (SubResult(agent="legal", content=f"'{instruction}'에 답할 조문을 찾지 못했다."),
                 EvidencePart(legal_answer=ans))
