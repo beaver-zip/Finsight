@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useCorpData } from "../hooks/useCorpData.ts";
 import { Table } from "../components/Table.tsx";
@@ -13,88 +13,6 @@ const REPORT_STEPS = [
   "차트 생성",
   "종합 결론",
 ];
-
-const HtmlWithScriptsRenderer = ({ htmlString }: { htmlString: string }) => {
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container || !htmlString) return;
-
-    // Clear previous content
-    container.innerHTML = "";
-
-    const tempDiv = document.createElement("div");
-    tempDiv.innerHTML = htmlString;
-
-    // Force links to open in a new tab
-    const links = Array.from(tempDiv.querySelectorAll("a"));
-    links.forEach((link) => {
-      link.setAttribute("target", "_blank");
-      link.setAttribute("rel", "noopener noreferrer"); // For security
-    });
-
-    // 재무제표처럼 열이 많은 표는 가로 스크롤 컨테이너로 감싼다(v2 리포트는 자체 스크롤 컨테이너가 있다)
-    Array.from(tempDiv.querySelectorAll("table")).forEach((table) => {
-      if (table.parentElement?.classList.contains("table-wrap")) return;
-      if (table.closest(".fs-report")) return;
-      const wrap = document.createElement("div");
-      wrap.className = "table-wrap";
-      table.parentElement?.insertBefore(wrap, table);
-      wrap.appendChild(table);
-    });
-
-    const scripts = Array.from(tempDiv.querySelectorAll("script"));
-
-    // Append non-script HTML content first
-    const fragment = document.createDocumentFragment();
-    Array.from(tempDiv.childNodes).forEach((node) => {
-      if (node.nodeName.toLowerCase() !== "script") {
-        fragment.appendChild(node.cloneNode(true));
-      }
-    });
-    container.appendChild(fragment);
-
-    const loadedScripts: HTMLScriptElement[] = [];
-
-    const executeScripts = async () => {
-      for (const script of scripts) {
-        const newScript = document.createElement("script");
-        script.getAttributeNames().forEach((attr) => {
-          newScript.setAttribute(attr, script.getAttribute(attr) || "");
-        });
-
-        if (script.src) {
-          await new Promise<void>((resolve, reject) => {
-            newScript.onload = () => resolve();
-            newScript.onerror = () =>
-              reject(new Error(`Script load error for ${script.src}`));
-            document.body.appendChild(newScript);
-            loadedScripts.push(newScript);
-          });
-        } else {
-          newScript.innerHTML = script.innerHTML;
-          document.body.appendChild(newScript);
-          loadedScripts.push(newScript);
-        }
-      }
-    };
-
-    executeScripts();
-
-    return () => {
-      loadedScripts.forEach((script) => {
-        if (document.body.contains(script)) {
-          document.body.removeChild(script);
-        }
-      });
-    };
-  }, [htmlString]);
-
-  // v2 리포트(.fs-report)는 자체 스타일을 내장하므로 기존 report-body 스타일을 씌우지 않는다
-  const isV2 = htmlString.includes('class="fs-report"');
-  return <div ref={containerRef} className={isV2 ? "w-full" : "report-body w-full"} />;
-};
 
 /** 보고서 HTML에서 제목(h1)을 뽑아 상단 바에 표시한다. */
 function extractReportTitle(html: string): string {
@@ -163,7 +81,6 @@ function Report() {
 
   // ---------- 보고서 결과 화면 ----------
   if (reportHtml) {
-    const isV2Report = reportHtml.includes('class="fs-report"');
     return (
       <div className="flex min-h-screen w-full flex-col bg-ink-50 font-sans">
         <header className="sticky top-0 z-20 border-b border-ink-200 bg-white">
@@ -200,22 +117,10 @@ function Report() {
         </header>
 
         <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-8 sm:px-6">
-          {/* v2 리포트는 자체 여백·머리말·면책 문구를 갖고 있어 카드 안쪽 여백과 아래 문구를 뺀다 */}
-          <article
-            className={
-              isV2Report
-                ? "overflow-hidden rounded-2xl border border-ink-200 bg-white shadow-card"
-                : "rounded-2xl border border-ink-200 bg-white p-6 shadow-card sm:p-10"
-            }
-          >
-            <HtmlWithScriptsRenderer htmlString={reportHtml} />
+          {/* 백엔드 보고서(.fs-report)는 자체 스타일·여백·면책 문구를 갖고 있다 */}
+          <article className="overflow-hidden rounded-2xl border border-ink-200 bg-white shadow-card">
+            <div className="w-full" dangerouslySetInnerHTML={{ __html: reportHtml }} />
           </article>
-          {!isV2Report && (
-            <p className="mt-4 text-center text-[12.5px] text-ink-400">
-              본 보고서는 DART 공시와 웹 자료를 AI가 자동 분석한 결과이며 투자
-              권유가 아닙니다.
-            </p>
-          )}
         </main>
       </div>
     );
