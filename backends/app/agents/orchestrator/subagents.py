@@ -145,11 +145,9 @@ def news_digest(corp: CorpProfile, items: list[NewsItem], note: str | None) -> s
 async def run_news(corp: CorpProfile, *, dart: DartClient, http: httpx.AsyncClient) -> tuple[SubResult, EvidencePart]:
     disclosures = await dart_filings.disclosures(dart, corp.corp_code)
     res = await run_pipeline(corp, disclosures, http=http)
-    by_url = {c.url: c for c in res.candidates}
-    texts = {n.id: by_url[n.url].text for n in res.items if n.url in by_url and by_url[n.url].text}
     cites = [Citation(kind="news", id=n.id, label=n.title, url=n.url) for n in res.items]
     return (SubResult(agent="news", content=news_digest(corp, res.items, res.note), citations=cites),
-            EvidencePart(news=res.items, news_text=texts))
+            EvidencePart(news=res.items, news_text=res.texts))
 
 
 def merge_evidence(parts: list[Any]):

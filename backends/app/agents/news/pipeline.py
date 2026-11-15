@@ -44,6 +44,7 @@ class NewsResult:
     candidates: list[Candidate]          # 평가(pooling)용: 분류까지 끝난 전체 후보
     researched: bool
     n_initial: int = 0                   # 커버리지 재검색 전 후보 수(candidates[:n_initial]이 N1 후보)
+    texts: dict[str, str] = field(default_factory=dict)     # 기사 id → 본문(검증 근거)
 
 
 # ---------- 1. 질의 계획 ----------
@@ -289,4 +290,5 @@ async def run_pipeline(corp: CorpProfile, disclosures: list[Disclosure], *, http
     if not cov.passed:
         med = f"{cov.median_age_days:.0f}일" if cov.median_age_days is not None else "알 수 없음"
         note = f"커버리지 미달: 덮은 측면 {cov.aspects}개, 기사 나이 중앙값 {med}"
-    return NewsResult(items=items, note=note, candidates=pool, researched=researched, n_initial=n_initial)
+    return NewsResult(items=items, note=note, candidates=pool, researched=researched, n_initial=n_initial,
+                      texts={n.id: c.text for n, (c, _) in zip(items, final)})

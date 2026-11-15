@@ -132,5 +132,6 @@ async def test_pipeline_researches_missing_aspects_and_fills_failed_summaries(mo
     assert [c.id for c in res.candidates] == [f"a{i}" for i in range(7)]          # 재검색 후보는 a4부터
     assert classified == [["a0", "a1", "a2", "a3"], ["a4", "a5", "a6"]]            # 새 대표만 분류한다
     assert [n.id for n in res.items] == [f"n{i}" for i in range(1, 6)]
+    assert res.texts == {n.id: f"{n.url.rsplit('/', 1)[1]} 본문 첫 문장입니다. " + "가" * 200 for n in res.items}
     assert not {f"https://x.kr/{u}" for u in fail} & {n.url for n in res.items} and len(summarized) == 7
     assert backup["peak"] == 2
