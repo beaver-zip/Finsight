@@ -146,6 +146,8 @@ function Report() {
 
       if (!response.ok) throw new Error("네트워크 응답이 실패했습니다.");
       const data = await response.text();
+      // 분석 자료가 없으면 백엔드가 200과 빈 본문을 준다
+      if (!data.trim()) throw new Error("빈 보고서");
       setReportHtml(data);
     } catch (err) {
       console.error("답변을 가져오는 데 실패했습니다:", err);
