@@ -88,13 +88,15 @@ async def build_report(st: AppState, corp_code: str) -> dict:
         return value
 
 
+# 예외 → (HTTP 상태, SSE code). DartLimit은 DartError의 하위 클래스라 DartError(502)보다 먼저 본다.
+_ERRORS = ((DartLimit, 429, "DART_LIMIT"), (budget.BudgetExceeded, 402, "BUDGET"),
+           (budget.TokenBudgetExceeded, 429, "TOKEN_BUDGET"))
+
+
 def _http_error(e: Exception) -> HTTPException:
-    if isinstance(e, DartLimit):
-        return HTTPException(429, "OpenDART 요청 한도를 넘었습니다")
-    if isinstance(e, budget.BudgetExceeded):
-        return HTTPException(402, str(e))
-    if isinstance(e, budget.TokenBudgetExceeded):
-        return HTTPException(429, str(e))
+    for cls, status, _ in _ERRORS:
+        if isinstance(e, cls):
+            return HTTPException(status, "OpenDART 요청 한도를 넘었습니다" if cls is DartLimit else str(e))
     if isinstance(e, DartError):
         return HTTPException(502, str(e))
     return HTTPException(500, f"보고서 생성 중 오류: {e}")
@@ -119,10 +121,4 @@ async def report_json(corp_code: str, st: AppState = Depends(get_state)):
 
 def error_code(e: Exception) -> str:
     """SSE error 이벤트 code."""
-    if isinstance(e, DartLimit):
-        return "DART_LIMIT"
-    if isinstance(e, budget.BudgetExceeded):
-        return "BUDGET"
-    if isinstance(e, budget.TokenBudgetExceeded):
-        return "TOKEN_BUDGET"
-    return "INTERNAL"
+    return next((code for cls, _, code in _ERRORS if isinstance(e, cls)), "INTERNAL")
