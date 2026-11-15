@@ -88,6 +88,15 @@ async def _guard() -> None:
     budget.check_request_tokens()
 
 
+async def _send(kwargs: dict[str, Any]) -> Message:
+    async with _sem:
+        if kwargs["max_tokens"] > MAX_TOKENS["medium"]:
+            # 긴 출력(본문 작성·법령 답변 등)은 스트리밍으로 받는다. 비스트리밍은 한 번의 읽기 제한(120초)에 걸린다
+            async with client().messages.stream(**kwargs) as st:
+                return await st.get_final_message()
+        return await client().messages.create(**kwargs)
+
+
 def text_of(msg: Message) -> str:
     return "".join(b.text for b in msg.content if b.type == "text")
 
@@ -128,13 +137,7 @@ async def structured(schema: type[T], messages: list[dict], *, role: Role = "def
         if not thinking:
             # 주어진 사실로 문장을 채우는 작업(본문 작성 등)은 생각 단계 없이도 품질이 같고 3배 빠르다
             kwargs["thinking"] = {"type": "disabled"}
-        async with _sem:
-            if max_tokens > MAX_TOKENS["medium"]:
-                # 긴 출력(본문 작성 등)은 스트리밍으로 받는다. 비스트리밍은 한 번의 읽기 제한(120초)에 걸린다
-                async with client().messages.stream(**kwargs) as st:
-                    resp = await st.get_final_message()
-            else:
-                resp = await client().messages.create(**kwargs)
+        resp = await _send(kwargs)
         await _account(model, resp.usage, task=task)
 
         if resp.stop_reason == "max_tokens":
@@ -188,10 +191,11 @@ async def cited(question: str, docs: list[dict], *, role: Role = "default",
                                   output_config={"effort": effort})
     if system:
         kwargs["system"] = system
-    async with _sem:
-        resp = await client().messages.create(**kwargs)
+    resp = await _send(kwargs)
     await _account(model, resp.usage, task=task)
-    if s.llm_cache:
+    if resp.stop_reason == "max_tokens":
+        log.warning("cited %s: max_tokens(%d)에서 잘림, 캐시하지 않는다", task, max_tokens)
+    elif s.llm_cache:
         await get_cache().set("llm", cache_key, resp.model_dump(mode="json"))
     return resp
 
@@ -216,8 +220,7 @@ async def text(messages: list[dict], *, role: Role = "default", effort: Effort =
                                   messages=messages, output_config={"effort": effort})
     if system:
         kwargs["system"] = system
-    async with _sem:
-        resp = await client().messages.create(**kwargs)
+    resp = await _send(kwargs)
     await _account(model, resp.usage, task=task)
     out = text_of(resp)
     if s.llm_cache:
