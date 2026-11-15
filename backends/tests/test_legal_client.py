@@ -35,3 +35,13 @@ async def test_get_retries_only_server_errors(monkeypatch, codes, calls, ok):
             await c._get("lawService.do", {"ID": "1"})
         assert "secret-oc" not in str(e.value)
     assert len(seen) == calls
+
+
+@pytest.mark.asyncio
+async def test_failed_search_body_is_not_cached(monkeypatch):
+    bodies = ["<LawSearch><resultCode>01</resultCode><resultMsg>bad key</resultMsg></LawSearch>",
+              "<LawSearch><resultCode>00</resultCode></LawSearch>"]
+    c = _law_client(monkeypatch, lambda request: httpx.Response(200, text=bodies.pop(0)))
+    with pytest.raises(client.LawApiError):
+        await c.search("law", "전자금융거래법")
+    assert "<resultCode>00</resultCode>" in await c.search("law", "전자금융거래법")
