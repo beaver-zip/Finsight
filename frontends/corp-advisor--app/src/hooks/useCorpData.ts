@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { BASE_URL } from "../api/baseUrl";
 
 export interface FinancialRecord {
   corp_code: string;
@@ -29,8 +30,6 @@ interface ApiResponse {
   data: FinancialRecord[];
   success: boolean;
 }
-
-const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 export const useCorpData = (query: string) => {
   const [data, setData] = useState<FinancialRecord[]>([]);

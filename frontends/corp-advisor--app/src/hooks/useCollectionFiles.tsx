@@ -1,5 +1,6 @@
 // hooks/useCollectionFiles.ts
 import { useState, useEffect, useCallback } from "react";
+import { BASE_URL } from "../api/baseUrl";
 
 // API 응답으로 받을 파일의 타입 (필요에 따라 수정)
 export interface CollectionFile {
@@ -7,8 +8,6 @@ export interface CollectionFile {
   chunk_count?: number;
   articles?: number;
 }
-
-const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 export const useCollectionFiles = () => {
   // 파일 목록 상태

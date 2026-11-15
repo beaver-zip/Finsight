@@ -2,7 +2,7 @@ import { useState } from "react";
 import { uploadPdfs } from "../../api/documents";
 import { FileUploader } from "../FileUploader";
 import { Button } from "../Button";
-const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+import { BASE_URL } from "../../api/baseUrl";
 
 // UploadModal 컴포넌트가 받을 props 타입 정의
 type UploadModalProps = {

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { readChatStream } from "../api/chatStream";
-
-const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+import { BASE_URL } from "../api/baseUrl";
 
 /** 드롭다운: 자동(기본) · 법령 · 기업 · 뉴스. auto가 아니면 백엔드가 의도를 그 값으로 고정한다. */
 export type QueryMode = "auto" | "legal" | "company" | "news";

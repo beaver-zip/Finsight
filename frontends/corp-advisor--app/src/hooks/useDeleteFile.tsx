@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react";
+import { BASE_URL } from "../api/baseUrl";
 
 // 훅이 반환할 상태와 함수의 타입을 정의합니다.
 interface UseDeleteFileReturn {
@@ -7,7 +8,6 @@ interface UseDeleteFileReturn {
   isSuccess: boolean;
   error: Error | null;
 }
-const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 /**
  * 파일 이름으로 서버에 파일 삭제 요청을 보내는 커스텀 훅

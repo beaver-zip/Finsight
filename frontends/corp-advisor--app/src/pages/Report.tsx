@@ -4,7 +4,7 @@ import { useCorpData } from "../hooks/useCorpData.ts";
 import { Table } from "../components/Table.tsx";
 import { SendHorizonal, ChevronLeft, Printer, RotateCcw } from "lucide-react";
 import { LoadingSpinner } from "../components/LoadingSpinner.tsx";
-const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+import { BASE_URL } from "../api/baseUrl";
 
 const REPORT_STEPS = [
   "DART 기업개황",
