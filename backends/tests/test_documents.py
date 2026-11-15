@@ -547,3 +547,20 @@ async def test_unregistered_upper_case_pdf_is_listed(store):
     uploads.save_file("Policy.PDF", _pdf("Scanned."))
     files = (await documents.show_files())["unique_file_name_and_chunk"]
     assert files == [{"file_name": "Policy.PDF", "chunk_count": 0, "articles": 0}]
+
+
+@pytest.mark.asyncio
+async def test_document_list_avoids_python_312_glob_option(store, monkeypatch):
+    from pathlib import Path
+
+    glob = Path.glob
+
+    def glob_311(self, pattern):  # Python 3.11의 Path.glob은 case_sensitive를 받지 않는다
+        return glob(self, pattern)
+
+    monkeypatch.setattr(Path, "glob", glob_311)
+    uploads.save_file("Policy.PDF", _pdf("Scanned."))
+    uploads.save_file("내규.pdf", _pdf("Rule."))
+    uploads.pending_path(uploads.file_path("내규.pdf")).write_bytes(b"x")
+    files = (await documents.show_files())["unique_file_name_and_chunk"]
+    assert [f["file_name"] for f in files] == ["Policy.PDF", "내규.pdf"]
