@@ -7,7 +7,6 @@ export type Message = {
   id: number;
   type: "question" | "answer" | "loading";
   text: string | ReactNode;
-  isStreaming?: boolean;
   options?: string[];       // 되묻기 선택지(/chat interrupt)
 };
 
@@ -56,9 +55,6 @@ export function Bubble({ isQuestion, answerClass, msg }: BubbleProps) {
           >
             {msg.text}
           </ReactMarkdown>
-          {msg.isStreaming && (
-            <span className="ml-0.5 inline-block h-[1em] w-[2px] translate-y-[2px] animate-pulse bg-brand-500" />
-          )}
       </div>
     );
   };

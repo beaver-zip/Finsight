@@ -25,7 +25,6 @@ function Chatbot() {
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState("");
-  const [typingTextMap, setTypingTextMap] = useState<{ [id: number]: string }>({});
   const [queryMode, setQueryMode] = useState<QueryMode>("auto");
   const [awaitingResume, setAwaitingResume] = useState(false);
   const { send, isLoading, resetThread } = useChatStream();
@@ -46,40 +45,6 @@ function Chatbot() {
 
   const chatEndRef = useRef<null | HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  // 타자 치기 효과(긴 답변은 한 번에 여러 글자씩 흘려 체감 속도를 유지)
-  useEffect(() => {
-    const entries = Object.entries(typingTextMap);
-    if (entries.length === 0) return;
-    const intervals: ReturnType<typeof setInterval>[] = [];
-    entries.forEach(([idStr, fullText]) => {
-      const id = Number(idStr);
-      const step = Math.max(2, Math.ceil(fullText.length / 220));
-      let charIndex = 0;
-      const intervalId = setInterval(() => {
-        if (charIndex < fullText.length) {
-          charIndex = Math.min(charIndex + step, fullText.length);
-          const currentText = fullText.slice(0, charIndex);
-          setMessages((prev) =>
-            prev.map((msg) => (msg.id === id ? { ...msg, type: "answer", text: currentText } : msg)),
-          );
-        } else {
-          clearInterval(intervalId);
-          setMessages((prev) =>
-            prev.map((msg) =>
-              msg.id === id ? { ...msg, isStreaming: false, type: "answer" } : msg,
-            ),
-          );
-          setTypingTextMap((prev) => {
-            const { [id]: _, ...rest } = prev;
-            return rest;
-          });
-        }
-      }, 16);
-      intervals.push(intervalId);
-    });
-    return () => intervals.forEach(clearInterval);
-  }, [typingTextMap]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -108,7 +73,6 @@ function Chatbot() {
         id: aid,
         type: "loading",
         text: <LoadingSpinner loadingText="질문을 분류하고 있습니다" />,
-        isStreaming: true,
       },
     ]);
     setInputValue("");
@@ -124,19 +88,19 @@ function Chatbot() {
           setMessages((prev) =>
             prev.map((m) =>
               m.id === aid
-                ? { ...m, type: "answer", text: it.question, isStreaming: false, options: it.options }
+                ? { ...m, type: "answer", text: it.question, options: it.options }
                 : m,
             ),
           );
         },
         onFinal: (answer) => {
           // 출처는 답변 마크다운 끝의 번호 목록(본문 [1]과 같은 번호)에 있으므로 따로 패널을 띄우지 않는다
-          setTypingTextMap((prev) => ({
-            ...prev,
-            [aid]:
-              (answer?.markdown ?? "답변을 만들지 못했습니다.") +
-              (cut ? "\n\n> 요청 하나에 쓸 수 있는 토큰을 넘어 일부 단계를 건너뛰었습니다." : ""),
-          }));
+          const text =
+            (answer?.markdown ?? "답변을 만들지 못했습니다.") +
+            (cut ? "\n\n> 요청 하나에 쓸 수 있는 토큰을 넘어 일부 단계를 건너뛰었습니다." : "");
+          setMessages((prev) =>
+            prev.map((m) => (m.id === aid ? { ...m, type: "answer", text } : m)),
+          );
         },
         onError: (message, partial, code) => {
           if (code === "TOKEN_BUDGET") cut = true;
@@ -147,7 +111,6 @@ function Chatbot() {
                 ? {
                     ...m,
                     type: "answer",
-                    isStreaming: false,
                     text: `답변을 가져오지 못했습니다. 백엔드 서버 상태를 확인해 주세요. (${message})`,
                   }
                 : m,
@@ -169,7 +132,6 @@ function Chatbot() {
 
   const handleReset = () => {
     setMessages([]);
-    setTypingTextMap({});
     setAwaitingResume(false);
     resetThread();
   };
