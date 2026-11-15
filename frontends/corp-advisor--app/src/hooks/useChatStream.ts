@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { readChatStream } from "../api/chatStream";
 
 const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
@@ -38,6 +38,9 @@ export function useChatStream() {
   const [threadId, setThreadId] = useState<string>(newThreadId);
   const [isLoading, setIsLoading] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+
+  // 화면을 떠나면 스트림을 끊어 백엔드 그래프 실행(LLM 호출)도 멈추게 한다
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   const resetThread = useCallback(() => {
     abortRef.current?.abort();
