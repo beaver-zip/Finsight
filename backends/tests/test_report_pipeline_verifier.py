@@ -1,4 +1,5 @@
 """verify의 LLM 판정 재사용(judged)과 두 판정 호출."""
+import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
@@ -22,3 +23,21 @@ async def test_judged_cache_rejudges_claim_when_only_evidence_ids_change(monkeyp
     result = await verifier.verify([fixed], verifier.Evidence(), judged=judged)
     assert support.await_count == 2
     assert [i.type for i in result.issues] == ["missing_citation"]  # 예전 unsupported 판정을 물려받지 않는다
+
+
+@pytest.mark.asyncio
+async def test_support_and_advice_checks_run_concurrently(monkeypatch):
+    both = asyncio.Barrier(2)
+
+    async def support(claims, ev):
+        await asyncio.wait_for(both.wait(), 1)
+        return [VerificationIssue(claim_id="c", type="partial", detail="일부")]
+
+    async def advice(claims):
+        await asyncio.wait_for(both.wait(), 1)
+        return [VerificationIssue(claim_id="c", type="investment_advice", detail="권유")]
+
+    monkeypatch.setattr(verifier, "support_check", support)
+    monkeypatch.setattr(verifier, "advice_check", advice)
+    result = await verifier.verify([Claim(id="c", text="매수 권유")], verifier.Evidence())
+    assert [i.type for i in result.issues] == ["partial", "investment_advice"]

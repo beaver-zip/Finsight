@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from dataclasses import dataclass, field
@@ -181,7 +182,8 @@ async def verify(claims: list[Claim], ev: Evidence, *, judged: dict[str, list[Ve
 
     todo = [c for c in claims if key(c) not in judged]
     if todo:
-        found = await support_check(todo, ev) + await advice_check(todo)
+        sup, adv = await asyncio.gather(support_check(todo, ev), advice_check(todo))   # 서로의 결과를 쓰지 않는다
+        found = sup + adv
         for c in todo:
             judged[key(c)] = [i for i in found if i.claim_id == c.id]
     for c in claims:
