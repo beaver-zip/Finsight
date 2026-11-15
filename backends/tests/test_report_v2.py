@@ -8,7 +8,8 @@ import httpx
 import pytest
 
 from app.agents.company import writer
-from app.agents.company.analysis import Consensus, Inputs, analyze, clean_title, ret_between
+from app.agents.company.analysis import Consensus, Inputs, analyze, clean_title, make_inputs, ret_between
+from app.agents.company.collect import Collected
 from app.agents.company.render import Text, news_html, render_report, table_html, ticks
 from app.core.dart.history import QRow, qkey
 from app.core.dart.prelim import Prelim, PrelimFiling, PrelimRow
@@ -153,6 +154,15 @@ def test_key_cards_survive_index_failure_and_share_mcap_text():
     assert cards["52주 최고"]["value"] == data.facts["hi52.now"].text
     assert cards["12개월 수익률"]["sub"] == "" and cards["12개월 수익률"]["sub_sign"] is None
     assert cards["시가총액"]["value"] == data.facts["mcap.now"].text
+
+
+def test_make_inputs_copies_collected_and_defaults_segment_source():
+    base = _inputs()
+    col = Collected(quarters=base.quarters, px=base.px, index_name="KOSDAQ", errors=["x"])
+    inp = make_inputs(base.corp, base.today, base.filing, col, news=None)
+    assert inp.quarters is col.quarters and inp.index_name == "KOSDAQ" and inp.news == [] and inp.consensus is None
+    assert inp.segment_source == Inputs.segment_source and "내부거래 포함" in inp.segment_source
+    assert make_inputs(base.corp, base.today, base.filing, Collected(segment_source="주석")).segment_source == "주석"
 
 
 def test_cfo_to_net_income_blank_when_cfo_negative():

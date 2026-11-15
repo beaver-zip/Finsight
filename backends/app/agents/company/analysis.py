@@ -14,11 +14,9 @@ from calendar import monthrange
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import Any
 
+from app.agents.company.collect import Collected
 from app.core.dart.history import QRow, prev_quarter, qkey
-from app.core.dart.prelim import Prelim, PrelimFiling
-from app.core.dart.shares import BuybackDecision, Dividend, Shares
 from app.core.peers import PeerRow
 from app.domain import fmt
 from app.domain.accounts import CASH_LIKE, DEBT_LIKE
@@ -41,41 +39,23 @@ class Consensus:
     quote: str | None
 
 
-@dataclass
-class Inputs:
+@dataclass(kw_only=True)
+class Inputs(Collected):
+    """collect.Collected + 회사·기준일·정기보고서·컨센서스·뉴스·공시."""
     corp: CorpProfile
     today: date
     filing: PeriodicFiling
-    quarters: list[QRow]
-    prelim: Prelim | None
-    cum: dict[tuple[int, int], dict]
-    shares: dict[tuple[int, int], Shares]
-    splits: list[tuple[date, float]]
-    dividends: dict[int, Dividend]
-    buybacks: list[BuybackDecision]
-    px: list[tuple[date, float]]
-    index_px: list[tuple[date, float]]
-    index_name: str
-    pref_px: float | None
-    prelim_firsts: list[PrelimFiling]
-    segments: dict[tuple[int, int], dict[str, dict[str, Decimal]]]
-    peers: list[PeerRow]
-    consensus: Consensus | None
-    news: list[NewsItem]
-    disclosures: list[Disclosure]
-    industry: str = "general"
+    consensus: Consensus | None = None
+    news: list[NewsItem] = field(default_factory=list)
+    disclosures: list[Disclosure] = field(default_factory=list)
     segment_source: str = "정기보고서 사업부문별 요약 재무 현황(내부거래 포함)"
 
 
-def make_inputs(corp: CorpProfile, today: date, filing: PeriodicFiling, col: Any, *, consensus: Consensus | None = None,
+def make_inputs(corp: CorpProfile, today: date, filing: PeriodicFiling, col: Collected, *, consensus: Consensus | None = None,
                 news: list[NewsItem] | None = None, disclosures: list[Disclosure] | None = None) -> Inputs:
-    """collect.Collected + 뉴스·공시·컨센서스 → Inputs."""
-    return Inputs(corp=corp, today=today, filing=filing, quarters=col.quarters, prelim=col.prelim, cum=col.cum,
-                  shares=col.shares, splits=col.splits, dividends=col.dividends, buybacks=col.buybacks, px=col.px,
-                  index_px=col.index_px, index_name=col.index_name, pref_px=col.pref_px,
-                  prelim_firsts=col.prelim_firsts, segments=col.segments, peers=col.peers, consensus=consensus,
-                  news=list(news or []), disclosures=list(disclosures or []), industry=col.industry,
-                  segment_source=col.segment_source or Inputs.segment_source)
+    return Inputs(**{**vars(col), "segment_source": col.segment_source or Inputs.segment_source}, corp=corp,
+                  today=today, filing=filing, consensus=consensus, news=list(news or []),
+                  disclosures=list(disclosures or []))
 
 
 @dataclass
