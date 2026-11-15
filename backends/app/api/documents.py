@@ -54,7 +54,7 @@ async def upload_pdf(files: list[UploadFile] = File(...)):
     uploaded, rejected = [], []
     for f in files:
         try:
-            data = await f.read()
+            data = await f.read(uploads.MAX_BYTES + 1)   # 한도를 넘는지만 알면 되므로 그 이상은 읽지 않는다
             path = uploads.save_file(f.filename or "", data)
             uploaded.append(path.name)
         except uploads.UploadError as e:

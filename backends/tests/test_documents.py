@@ -101,6 +101,15 @@ def test_upload_register_list_delete_roundtrip(store):
     assert vec.chunks == [] and uploads.all_docs() == {} and list((store / "files").iterdir()) == []
 
 
+def test_upload_rejects_oversized_file_without_truncating(store, monkeypatch):
+    app = FastAPI()
+    app.include_router(documents.files_router, prefix="/files")
+    monkeypatch.setattr(uploads, "MAX_BYTES", 8)
+    r = TestClient(app).post("/files/upload-pdf", files=[("files", ("큰.pdf", b"%PDF-1.4 0123456789", "application/pdf"))])
+    assert r.status_code == 400 and "20MB" in r.json()["detail"]["rejected"][0]["reason"]
+    assert not (store / "files" / "큰.pdf").exists()
+
+
 def test_unregistered_upload_is_listed_and_deletable(store):
     vec = FakeVectors()
     app = FastAPI()
