@@ -5,6 +5,7 @@ error(code, message, partial). 되묻기에 답할 때는 같은 thread_id로 re
 """
 from __future__ import annotations
 
+import json
 import logging
 from typing import Literal
 
@@ -14,12 +15,16 @@ from langchain_core.messages import HumanMessage
 from langgraph.types import Command
 from pydantic import BaseModel
 
-from app.api.report import _sse, build_report, error_code
+from app.api.report import build_report, error_code
 from app.core import budget
 from app.deps import AppState, get_state
 
 log = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def _sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
 
 
 class ChatRequest(BaseModel):

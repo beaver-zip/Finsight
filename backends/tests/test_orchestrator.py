@@ -132,9 +132,9 @@ async def test_listed_candidates_prefers_listed_by_market_cap(monkeypatch):
             {"corp_code": "2", "corp_name": "삼성SDI", "stock_code": "006400"},
             {"corp_code": "3", "corp_name": "삼성전자", "stock_code": "005930"}]
 
-    async def corp_list(dart):
-        return rows
-    monkeypatch.setattr(G.dart_corp, "corp_list", corp_list)
+    async def index(dart):
+        return rows, [G.dart_corp._norm(r["corp_name"]) for r in rows]
+    monkeypatch.setattr(G.dart_corp, "_index", index)          # corp_list·find_candidates가 함께 읽는다
     monkeypatch.setattr("app.core.peers.load_universe",
                         lambda: [{"stock_code": "005930", "mcap_approx": 400}, {"stock_code": "006400", "mcap_approx": 30}])
     names = lambda cs: [c["corp_name"] for c in cs]
