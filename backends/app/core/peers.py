@@ -65,6 +65,7 @@ class PeerRow:
     ni_q: float | None = None           # 최근 분기(3개월) 지배주주 순이익. 사업보고서 기준이면 None
     per_rr: float | None = None         # 최근 분기 순이익 × 4 기준 PER
     group: str = "general"              # 금융 세트 판정(industry_group). 대상 회사와 다르면 피어에서 뺀다
+    price_error: str = ""               # 시세 조회 예외. collect가 errors에 남겨 리포트 캐시를 짧게 한다
 
 
 def _f(v: Decimal | None) -> float | None:
@@ -115,12 +116,14 @@ async def metrics_for(dart: DartClient, corp_code: str, stock_code: str, corp_cl
     eq_prev_src = fy_prev if q == 4 else same_prev
     eq0 = (_f(value(eq_prev_src, "equity_owners")) or _f(value(eq_prev_src, "total_equity"))) if eq_prev_src else None
     eq_avg = (eq + eq0) / 2 if eq is not None and eq0 is not None else eq
+    price_error = ""
     try:
         price = await last_close(ticker_for(stock_code, corp_cls))
         pref_px = await pref_price(stock_code, corp_cls) if sh and sh.pref_out else None
     except Exception as e:  # noqa: BLE001
         log.info("피어 시세 실패 %s: %s", name, e)       # 시세 없이 재무 지표만 남긴다
         price = pref_px = None
+        price_error = f"{type(e).__name__}: {e}"
     total = sh.total_out if sh else None
     # shortcut: 최근 정기보고서 뒤 분할·병합한 피어는 주식 수가 시세와 기준이 달라 시가총액·PBR·PER이 틀린다.
     # 대상 회사 자기 행은 analysis._peers가 맞춘다. 다른 피어는 분할 이력을 불러야 하므로 사례가 생기면 넣는다.
@@ -128,7 +131,7 @@ async def metrics_for(dart: DartClient, corp_code: str, stock_code: str, corp_cl
     if price and sh:
         mcap = price * sh.common_out + (pref_px * sh.pref_out if pref_px else 0)
     row = PeerRow(corp_code, stock_code, name, is_self, mcap, ni_ttm, eq, eq_avg, price, total, induty_code=induty_code,
-                  group=industry_group(cur, induty_code))
+                  group=industry_group(cur, induty_code), price_error=price_error)
     if q < 4:
         row.ni_q = _f(value(cur, "net_income_owners", "thstrm_amount")) or _f(value(cur, "net_income", "thstrm_amount"))
     if ni_ttm is not None and eq_avg:

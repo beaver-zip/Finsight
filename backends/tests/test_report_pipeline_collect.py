@@ -61,3 +61,23 @@ async def test_price_fetch_failure_is_partial(sources):
     sources["daily_close"].side_effect = RuntimeError("YFRateLimitError")
     out = await col.collect(None, None, _corp("Y"), FILING, date(2024, 9, 1))
     assert "collect.price: RuntimeError: YFRateLimitError" in out.errors
+
+
+@pytest.mark.asyncio
+async def test_peer_price_failure_is_partial(sources, monkeypatch):
+    from types import SimpleNamespace as NS
+
+    from app.core import peers
+
+    # 대상 회사 시세는 캐시에 있어 성공하고, 피어 시세만 레이트 리밋으로 실패하는 경우
+    monkeypatch.setattr(col, "peer_rows", peers.peer_rows)
+    monkeypatch.setattr(peers, "_reports", AsyncMock(return_value={}))
+    monkeypatch.setattr(peers.dart_fin, "get_snapshot", AsyncMock(return_value=NS(reprt_code="11012", lines=[])))
+    monkeypatch.setattr(peers, "share_counts", AsyncMock(return_value=None))
+    monkeypatch.setattr(peers, "industry_group", lambda *a: "general")
+    monkeypatch.setattr(peers, "peer_candidates", lambda corp, n: [
+        {"corp_code": f"p{i}", "stock_code": f"00000{i}", "corp_cls": "Y", "name": f"피어{i}"} for i in range(3)])
+    monkeypatch.setattr(peers, "daily_close", AsyncMock(side_effect=RuntimeError("YFRateLimitError")))
+    out = await col.collect(None, None, _corp("Y"), FILING, date(2024, 9, 1))
+    assert len(out.peers) == 4 and all(r.mcap is None for r in out.peers)     # 행은 재무 지표만 남는다
+    assert "collect.peers: 4개 시세 실패, 첫 오류 RuntimeError: YFRateLimitError" in out.errors

@@ -107,6 +107,8 @@ async def collect(dart: DartClient, http: httpx.AsyncClient, corp: CorpProfile, 
     # 지수는 늘 시세가 있으므로 비면 yfinance가 오류를 숨긴 장애로 본다
     if tk and not ix:
         err.append("collect.index: 시세 없음")
+    if bad := [r.price_error for r in peers if r.price_error]:
+        err.append(f"collect.peers: {len(bad)}개 시세 실패, 첫 오류 {bad[0]}")
     if hist.errors:
         err.append(f"collect.history: {len(hist.errors)}개 분기 실패, 첫 오류 {hist.errors[0]}")
     if hist.snapshots:
