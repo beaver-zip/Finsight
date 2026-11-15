@@ -171,11 +171,10 @@ async def run_task(payload: dict, config: RunnableConfig) -> dict:
             res, ev = await run_legal(t.instruction, d.get("legal_runner"))
         elif t.agent == "company":
             _progress("chat.company", f"{corp.corp_name} 리포트 확인(없으면 새로 만든다)")
-            res, ev = await run_company(t.instruction, corp, d["report_builder"],
-                                        shift_news=payload.get("shift_news", False))
+            res, ev = await run_company(corp, d["report_builder"], shift_news=payload.get("shift_news", False))
         else:
             _progress("chat.news", f"{corp.corp_name} 최근 기사 검색")
-            res, ev = await run_news(t.instruction, corp, dart=d["dart"], http=d["http"])
+            res, ev = await run_news(corp, dart=d["dart"], http=d["http"])
     except Exception as e:  # noqa: BLE001
         log.exception("하위 과업 실패: %s", t.agent)
         return {"results": [SubResult(agent=t.agent, content="", error=f"{type(e).__name__}: {e}")],

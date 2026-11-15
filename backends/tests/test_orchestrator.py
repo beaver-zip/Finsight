@@ -73,7 +73,7 @@ async def test_company_ambiguous_interrupts_then_resumes(monkeypatch, patched):
     monkeypatch.setattr(G.dart_corp, "get_profile", profile)
     seen = []
 
-    async def company(instr, corp, build, **kw):
+    async def company(corp, build, **kw):
         seen.append(corp.corp_code)
         return SubResult(agent="company", content="사실표 …"), EvidencePart()
     monkeypatch.setattr(G, "run_company", company)
@@ -197,7 +197,7 @@ async def test_company_and_news_do_not_share_article_ids(monkeypatch, patched, n
     async def build(code):
         return {"html": "", "json": rep.model_dump(mode="json")}
 
-    async def news(instr, corp, **kw):
+    async def news(corp, **kw):
         if news_fails:
             raise RuntimeError("Tavily 429")
         return (SubResult(agent="news", content="[n1] 오늘 기사B",

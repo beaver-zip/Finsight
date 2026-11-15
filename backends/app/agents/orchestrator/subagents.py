@@ -13,7 +13,7 @@ import httpx
 
 from app.agents.legal.answer import link_of, render_markdown
 from app.agents.legal.tools import short_name
-from app.agents.news.pipeline import NewsConfig, run_pipeline
+from app.agents.news.pipeline import run_pipeline
 from app.core.dart import filings as dart_filings
 from app.core.dart.client import DartClient
 from app.core.law.corpus import load_corpus
@@ -112,8 +112,7 @@ def shift_news_ids(rep: CompanyReport, by: int = NEWS_SHIFT) -> CompanyReport:
     return CompanyReport.model_validate(d)
 
 
-async def run_company(instruction: str, corp: CorpProfile, build: ReportBuilder, *,
-                      shift_news: bool = False) -> tuple[SubResult, EvidencePart]:
+async def run_company(corp: CorpProfile, build: ReportBuilder, *, shift_news: bool = False) -> tuple[SubResult, EvidencePart]:
     out = await build(corp.corp_code)
     rep = CompanyReport.model_validate(out["json"])
     if shift_news:      # 같은 질문의 뉴스 과업도 n1~을 쓴다. 리포트(캐시) 기사와 겹치면 출처·검증 본문이 바뀐다
@@ -143,10 +142,9 @@ def news_digest(corp: CorpProfile, items: list[NewsItem], note: str | None) -> s
     return "\n".join(lines)
 
 
-async def run_news(instruction: str, corp: CorpProfile, *, dart: DartClient, http: httpx.AsyncClient,
-                   config: NewsConfig | None = None) -> tuple[SubResult, EvidencePart]:
+async def run_news(corp: CorpProfile, *, dart: DartClient, http: httpx.AsyncClient) -> tuple[SubResult, EvidencePart]:
     disclosures = await dart_filings.disclosures(dart, corp.corp_code)
-    res = await run_pipeline(corp, disclosures, http=http, config=config or NewsConfig())
+    res = await run_pipeline(corp, disclosures, http=http)
     by_url = {c.url: c for c in res.candidates}
     texts = {n.id: by_url[n.url].text for n in res.items if n.url in by_url and by_url[n.url].text}
     cites = [Citation(kind="news", id=n.id, label=n.title, url=n.url) for n in res.items]
