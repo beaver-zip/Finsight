@@ -238,10 +238,12 @@ def _key_data(c: dict) -> None:
     for lab, days in (("1M", 30), ("3M", 91), ("6M", 182)):
         r = ret_between(px, days)
         F.add(f"ret{lab}", "now", f"{lab} 주가 수익률", fmt.spct(r), r, "%")
-    sh = inp.shares.get((inp.filing.bsns_year, _q_of(inp.filing.reprt_code)))
+    fq = (inp.filing.bsns_year, _q_of(inp.filing.reprt_code))
+    sh = inp.shares.get(fq)
     mcap = None
     if sh:
-        mcap = last * sh.common_out + (inp.pref_px * sh.pref_out if inp.pref_px and sh.pref_out else 0)
+        k = _split_factor(inp, _q_end(fq))                # 시세는 분할을 반영한 값이다
+        mcap = last * sh.common_out * k + (inp.pref_px * sh.pref_out * k if inp.pref_px and sh.pref_out else 0)
         F.add("mcap", "now", "시가총액(보통주+우선주)", fmt.money(mcap, 0) if mcap >= 1e14 else fmt.money(mcap), mcap, "KRW")
         if inp.pref_px and sh.pref_out:
             disc = (1 - inp.pref_px / last) * 100
@@ -489,7 +491,8 @@ def _annual(c: dict) -> None:
             ni = sum(f(r.net_income_owners) for r in r4)
         sh = _shares_at(inp, (y, 4))
         dv = inp.dividends.get(y)
-        eps = dv.eps if dv and dv.eps else (ni / sh if ni is not None and sh else None)
+        k = _split_factor(inp, date(y, 12, 31))           # 공시 EPS·DPS는 당시 주식 기준, 연말 종가는 분할 반영
+        eps = dv.eps / k if dv and dv.eps else (ni / sh if ni is not None and sh else None)
         e = eq.get((y, 4))
         e0 = eq.get((y - 1, 4))
         bps = e / sh if e and sh else None
@@ -499,7 +502,7 @@ def _annual(c: dict) -> None:
                      "eps": eps, "bps": bps, "per": price / eps if price and eps and eps > 0 else None,
                      "pbr": price / bps if price and bps else None,
                      "roe": ni / ((e + e0) / 2) * 100 if ni is not None and e and e0 else None,
-                     "dps": dv.dps_common if dv else None})
+                     "dps": dv.dps_common / k if dv and dv.dps_common else None})
         heads.append(str(y))
         # 연간 실적도 사실표에 둔다(채팅에서 "최근 사업연도 매출액"을 슬롯으로 쓸 수 있게)
         fy = f"FY{str(y)[2:]}"
@@ -586,6 +589,10 @@ def _split_factor(inp: Inputs, d: date) -> float:
     return k
 
 
+def _q_end(yq: tuple[int, int]) -> date:
+    return date(yq[0], yq[1] * 3, 28)
+
+
 def _shares_at(inp: Inputs, yq: tuple[int, int]) -> float | None:
     """그 분기말 기준 보통+우선 유통주식수(분할 환산). 분기말 주식수가 없으면 직전 사업연도 말 값을 쓴다."""
     cands = [k for k in inp.shares if k <= yq]
@@ -594,10 +601,7 @@ def _shares_at(inp: Inputs, yq: tuple[int, int]) -> float | None:
         if not cands:
             return None
     k = max(cands)
-    sh = inp.shares[k]
-    y, q = k
-    end = date(y, q * 3, 28)
-    return sh.total_out * _split_factor(inp, end)
+    return inp.shares[k].total_out * _split_factor(inp, _q_end(k))
 
 
 # ---------------- 분기·부문 표
@@ -957,13 +961,16 @@ def _shareholder(c: dict, cur: tuple[int, int], fy_last: int) -> None:
     y, q = inp.filing.bsns_year, _q_of(inp.filing.reprt_code)
     # 발행주식수 감소(소각)
     base_y = fy_last - 1
-    b, n_ = inp.shares.get((base_y, 4)), inp.shares.get(cur) or inp.shares.get((y, q))
+    nk = cur if cur in inp.shares else (y, q)
+    b, n_ = inp.shares.get((base_y, 4)), inp.shares.get(nk)
     if b and n_:
-        cc = (n_.common_issued / b.common_issued - 1) * 100
+        # 사이에 분할·병합이 있으면 주식 수를 같은 기준으로 맞춘다(병합을 소각으로 보지 않게)
+        adj = _split_factor(inp, _q_end(nk)) / _split_factor(inp, _q_end((base_y, 4)))
+        cc = (n_.common_issued * adj / b.common_issued - 1) * 100
         if cc < -0.1:
             F.add("shares_cut_common", "since", f"{base_y}년 말 이후 보통주 발행주식수 변화", f"{abs(cc):.1f}% 감소", cc, "%")
         if b.pref_issued and n_.pref_issued:
-            cp = (n_.pref_issued / b.pref_issued - 1) * 100
+            cp = (n_.pref_issued * adj / b.pref_issued - 1) * 100
             if cp < -0.1:
                 F.add("shares_cut_pref", "since", f"{base_y}년 말 이후 우선주 발행주식수 변화", f"{abs(cp):.1f}% 감소", cp, "%")
         F.add("shares_base_year", "since", "발행주식수 비교 기준 연도", f"{base_y}년 말")

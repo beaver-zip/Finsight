@@ -14,6 +14,7 @@ from app.core.dart.history import QRow, qkey
 from app.core.dart.prelim import Prelim, PrelimFiling, PrelimRow
 from app.core.dart.shares import BuybackDecision, Dividend, Shares
 from app.core.peers import PeerRow
+from app.domain import fmt
 from app.domain.binding import render, untraceable_numbers
 from app.domain.models import (Block, CorpProfile, Headline, Metric, NewsItem, PeriodicFiling, ReportDraft,
                                VerificationIssue, VerificationResult)
@@ -216,6 +217,21 @@ def test_prelim_without_revenue_keeps_latest_table():
     assert "latest" in data.tables and data.charts["op"]["cons"] == pytest.approx(580e8)
     assert data.facts["op_vs_cons.3Q26P"].text == "3.4% 상회"
     assert "rev_vs_cons.3Q26P" not in data.facts
+
+
+@pytest.mark.parametrize("ratio", [5.0, 0.1])            # 5:1 분할, 10:1 병합
+def test_split_after_last_filing_keeps_per_share_values(ratio):
+    base = analyze(_inputs())
+    inp = _inputs()
+    inp.splits = [(date(2026, 9, 1), ratio)]               # 반기보고서(2026.06) 뒤 분할
+    inp.px = [(d, v / ratio) for d, v in inp.px]           # 시세는 분할 반영(수정 주가)
+    data = analyze(inp)
+    for k in ("mcap.now", "per.ttm", "pbr.now", "shares_cut_common.since"):
+        assert data.facts[k].text == base.facts[k].text, k
+    rows = lambda d: {r["head"]: r["cells"] for r in d.tables["annual"]["rows"]}
+    assert rows(data)["PER"] == rows(base)["PER"]
+    assert rows(data)["EPS"][:3] == [fmt.num(float(x.replace(",", "")) / ratio, 0) for x in rows(base)["EPS"][:3]]
+    assert rows(data)["주당배당금"][:3] == [fmt.num(1000 / ratio, 0)] * 3
 
 
 def test_render_without_draft_has_no_raw_slots():
