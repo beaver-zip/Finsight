@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timedelta
 
 import numpy as np
@@ -105,11 +106,16 @@ async def test_pipeline_researches_missing_aspects_and_fills_failed_summaries(mo
         classified.append([c.id for c in cands])
         for c in cands:
             c.relevance, c.aspect, c.materiality = 2, aspects[c.url.rsplit("/", 1)[1]], 2
-    fail, summarized = {"u0", "u4"}, []
+    fail, summarized, backup = {"u0", "u4"}, [], {"now": 0, "peak": 0}
 
     async def structured(model, messages, **k):
         u = messages[0]["content"].split("제목: 삼성전자 ", 1)[1].split("\n", 1)[0]
         summarized.append(u)
+        if len(summarized) > 5:                       # 6번째 호출부터 백업: 함께 돌아야 한다
+            backup["now"] += 1
+            backup["peak"] = max(backup["peak"], backup["now"])
+            await asyncio.sleep(0)
+            backup["now"] -= 1
         if u == "u4" and api_error:
             raise anthropic.APITimeoutError(request=httpx.Request("POST", "https://api.anthropic.com"))
         if u in fail:
@@ -127,3 +133,4 @@ async def test_pipeline_researches_missing_aspects_and_fills_failed_summaries(mo
     assert classified == [["a0", "a1", "a2", "a3"], ["a4", "a5", "a6"]]            # 새 대표만 분류한다
     assert [n.id for n in res.items] == [f"n{i}" for i in range(1, 6)]
     assert not {f"https://x.kr/{u}" for u in fail} & {n.url for n in res.items} and len(summarized) == 7
+    assert backup["peak"] == 2

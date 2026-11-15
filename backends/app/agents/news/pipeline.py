@@ -281,11 +281,10 @@ async def run_pipeline(corp: CorpProfile, disclosures: list[Disclosure], *, http
     backups = [c for c in reps if c.id not in chosen_ids]
     analyses = await asyncio.gather(*(summarize(name, c) for c in picked))
     final: list[tuple[Candidate, ArticleAnalysis]] = [(c, a) for c, a in zip(picked, analyses) if a is not None]
-    while len(final) < min(5, len(picked)) and backups:
-        c = backups.pop(0)
-        a = await summarize(name, c)
-        if a is not None:
-            final.append((c, a))
+    while (need := min(5, len(picked)) - len(final)) > 0 and backups:
+        batch, backups = backups[:need], backups[need:]
+        got = await asyncio.gather(*(summarize(name, c) for c in batch))
+        final += [(c, a) for c, a in zip(batch, got) if a is not None]
 
     items = [NewsItem(id=f"n{i + 1}", title=c.title, url=c.url, source=domain_of(c.url), published_at=c.published_at,
                       aspect=c.aspect, materiality=c.materiality, score=round(c.score, 4),
