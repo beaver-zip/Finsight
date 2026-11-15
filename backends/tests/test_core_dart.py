@@ -5,10 +5,11 @@ import io
 import time
 import zipfile
 
-from app.core.cache import SQLiteCache, set_cache
+import httpx
 
+from app.core.cache import SQLiteCache, set_cache
 from app.core.dart import corp, shares
-from app.core.dart.client import DartError, DartNoData
+from app.core.dart.client import DartError, DartLimit, DartNoData
 
 
 class FakeDart:
@@ -75,3 +76,89 @@ async def test_corp_list_is_read_once_per_cache_and_parsed_from_zip(temp_cache, 
     finally:
         set_cache(temp_cache)
         other.close()
+
+
+# ---------- 보고서명·잠정실적·주식 수 파서 ----------
+
+def test_parse_report_name_picks_report_code_by_fiscal_month():
+    from app.core.dart.filings import parse_report_name as p
+
+    assert p("사업보고서 (2025.12)", 12) == (2025, "11011")
+    assert p("반기보고서 (2026.06)", 12) == (2026, "11012")
+    assert p("분기보고서 (2026.03)", 12) == (2026, "11013")
+    assert p("[기재정정]분기보고서 (2026.09)", None) == (2026, "11014")     # 결산월 없으면 12월
+    assert p("분기보고서 (2026.06)", 3) == (2026, "11013")                 # 3월 결산: 6월이 1분기
+    assert p("분기보고서 (2026.12)", 3) == (2026, "11014")
+    assert p("분기보고서 (2026.06)", 12) is None                           # 결산월과 맞지 않는 분기
+    assert p("주요사항보고서(자기주식취득결정)", 12) is None
+
+
+def test_parse_prelim_applies_unit_multiplier():
+    from datetime import date
+    from decimal import Decimal
+
+    from app.core.dart.prelim import PrelimFiling, parse_prelim
+
+    cells = ["(단위 : 억원, %)", "당기실적", "2026-07-01", "2026-09-30",
+             "매출액", "당해실적", "1,000", "900", "11.1", "-", "800", "25.0", "-",
+             "누계실적", "3,000", "-", "-", "-", "2,500", "20.0", "-",
+             "영업이익", "당해실적", "△50", "10", "-", "적자전환", "20", "-", "-"]
+    f = PrelimFiling("r1", date(2026, 10, 28), "연결재무제표기준영업(잠정)실적(공정공시)", False)
+    p = parse_prelim(cells, f)
+    e8 = Decimal(10) ** 8
+    assert (p.year, p.q, p.unit, p.consolidated, p.key) == (2026, 3, "억원", True, "3Q26")
+    rev = p.rows["revenue"]
+    assert (rev.cur, rev.prev, rev.qoq, rev.yoy_base, rev.yoy) == (1000 * e8, 900 * e8, 11.1, 800 * e8, 25.0)
+    assert (rev.cum, rev.cum_prev, rev.cum_yoy) == (3000 * e8, 2500 * e8, 20.0)
+    op = p.rows["operating_income"]
+    assert (op.cur, op.qoq, op.note) == (-50 * e8, None, "적자전환")
+
+
+async def test_share_counts_sums_common_and_preferred_and_skips_total(temp_cache):
+    rows = [{"se": "보통주", "istc_totqy": "1,000", "tesstk_co": "100", "distb_stock_co": "900", "rcept_no": "r"},
+            {"se": "우선주", "istc_totqy": "200", "tesstk_co": "0", "distb_stock_co": "-"},     # 유통 칸 비면 발행−자기
+            {"se": "합계", "istc_totqy": "1,200", "tesstk_co": "100", "distb_stock_co": "1,100"}]
+    sh = await shares.share_counts(FakeDart({"status": "000", "list": rows}), "c", 2025, "11011")
+    assert (sh.common_issued, sh.common_out, sh.pref_issued, sh.pref_out, sh.total_out) == (1000, 900, 200, 200, 1100)
+    only_pref = [{"se": "의결권없는 주식", "istc_totqy": "10", "tesstk_co": "0", "distb_stock_co": "10"}]
+    assert await shares.share_counts(FakeDart({"status": "000", "list": only_pref}), "d", 2025, "11011") is None
+
+
+# ---------- DartClient 상태 코드·재시도 ----------
+
+async def _dart_calls(monkeypatch, *answers):
+    """MockTransport가 answers를 차례로 돌려주는 DartClient로 list.json을 한 번 부른다 → (결과 또는 예외, 호출 수)."""
+    from app.core.dart import client
+
+    monkeypatch.setattr(client, "require", lambda value, name: "K")
+    monkeypatch.setattr(client, "RETRY_DELAYS", (0, 0, 0))
+    queue, calls = list(answers), []
+
+    def handler(req):
+        calls.append(1)
+        a = queue.pop(0)
+        return httpx.Response(200, json={"status": a, "message": a}) if isinstance(a, str) else httpx.Response(a)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        try:
+            out = await client.DartClient(http).json("list")
+        except client.DartError as e:
+            out = e
+    return out, len(calls)
+
+
+async def test_dart_client_status_codes_and_retries(monkeypatch):
+    out, n = await _dart_calls(monkeypatch, "000")
+    assert out["status"] == "000" and n == 1
+    out, n = await _dart_calls(monkeypatch, "013")
+    assert isinstance(out, DartNoData) and n == 1
+    out, n = await _dart_calls(monkeypatch, "020")
+    assert isinstance(out, DartLimit) and n == 1                       # 한도 초과는 다시 부르지 않는다
+    out, n = await _dart_calls(monkeypatch, "800", "000")
+    assert out["status"] == "000" and n == 2                           # 점검은 기다렸다가 다시 부른다
+    out, n = await _dart_calls(monkeypatch, 503, "000")
+    assert out["status"] == "000" and n == 2
+    out, n = await _dart_calls(monkeypatch, 503, 503, 503, 503)
+    assert isinstance(out, DartError) and out.status == "503" and n == 4
+    out, n = await _dart_calls(monkeypatch, 404)
+    assert isinstance(out, DartError) and out.status == "404" and n == 1   # 4xx는 다시 불러도 같다
