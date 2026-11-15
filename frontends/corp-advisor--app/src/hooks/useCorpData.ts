@@ -27,6 +27,7 @@ function sortByRelevance(
 
 interface ApiResponse {
   data: FinancialRecord[];
+  success: boolean;
 }
 
 const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
@@ -56,7 +57,8 @@ export const useCorpData = (query: string) => {
         if (!response.ok)
           throw new Error("기업 리스트를 가져오는 데 실패했습니다.");
         const responseData: ApiResponse = await response.json();
-        const result = responseData.data ?? [];
+        // 결과가 없거나 실패하면 서버는 success=false와 data=[{}]를 준다
+        const result = responseData.success ? responseData.data : [];
 
         setData(sortByRelevance(result, query));
       } catch (err) {

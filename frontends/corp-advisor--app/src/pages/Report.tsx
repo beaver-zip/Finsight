@@ -26,7 +26,6 @@ function Report() {
 
   const [searchTerm, setSearchTerm] = useState(""); // 입력 폼 값
   const [submittedTerm, setSubmittedTerm] = useState(""); // fetch에 사용
-  const [tableSearch, setTableSearch] = useState(""); // 테이블 내부 검색
   const [reportHtml, setReportHtml] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -40,7 +39,6 @@ function Report() {
   const handleCorpSearch = () => {
     if (!searchTerm.trim()) return;
     setSubmittedTerm(searchTerm.trim());
-    setTableSearch(searchTerm.trim()); // 동시에 테이블 필터링
   };
 
   const handleNewReport = () => {
@@ -172,10 +170,7 @@ function Report() {
                 className="flex-1 rounded-xl border border-ink-200 bg-white px-4 py-3 text-[15px] shadow-card transition focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100"
                 placeholder="기업명을 입력하세요"
                 value={searchTerm}
-                onChange={(e) => {
-                  setSearchTerm(e.target.value); // 입력값 상태
-                  setTableSearch(e.target.value); // 테이블 필터링
-                }}
+                onChange={(e) => setSearchTerm(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") handleCorpSearch();
                 }}
@@ -200,14 +195,7 @@ function Report() {
               loading={corpLoading}
               error={corpError}
               isIdle={!submittedTerm}
-              data={corpData.filter((item) =>
-                Object.values(item).some((v) =>
-                  String(v).toLowerCase().includes(tableSearch.toLowerCase())
-                )
-              )}
-              isSearchInput={false}
-              searchTerm={tableSearch}
-              onSearchChange={setTableSearch}
+              data={corpData}
               onClick={generateReport}
             />
           </>
