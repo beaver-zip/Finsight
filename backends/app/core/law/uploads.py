@@ -148,23 +148,28 @@ def put(file_name: str, doc_name: str, articles: list[Article], chunk_count: int
                            "articles": [_article_keys(file_name, a.model_dump(mode="json")) for a in articles]}
         if vector_name is not None:
             data[file_name]["vector_name"] = vector_name
-        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=UPLOAD_DIR, delete=False) as f:
-            temp = Path(f.name)
-            try:
-                f.write(json.dumps(data, ensure_ascii=False))
-                f.close()
-                temp.replace(STORE)
-            finally:
-                temp.unlink(missing_ok=True)
+        atomic_write(STORE, json.dumps(data, ensure_ascii=False))
         _load.cache_clear()
+
+
+def atomic_write(path: Path, text: str) -> None:
+    """임시 파일에 다 쓴 뒤 교체한다. 중간에 실패해도 기존 파일은 그대로 남는다."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, delete=False) as f:
+        temp = Path(f.name)
+        try:
+            f.write(text)
+            f.close()
+            temp.replace(path)
+        finally:
+            temp.unlink(missing_ok=True)
 
 
 def remove(file_name: str) -> dict | None:
     with _lock:
         data = dict(_load())
         d = data.pop(file_name, None)
-        STORE.write_text(json.dumps(data, ensure_ascii=False))
+        atomic_write(STORE, json.dumps(data, ensure_ascii=False))
         _load.cache_clear()
     p = FILES / file_name
     p.unlink(missing_ok=True)

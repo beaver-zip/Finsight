@@ -198,6 +198,31 @@ def test_metadata_replace_failure_keeps_disk_and_cache(store, monkeypatch):
     assert set(store.iterdir()) == before_files
 
 
+def test_metadata_writes_are_atomic(store, monkeypatch, tmp_path):
+    from pathlib import Path
+
+    from app.core.law import corpus
+
+    uploads.put("내규.pdf", "내규", uploads.split_articles("내규", ["Old policy."]), 1)
+    monkeypatch.setattr(corpus, "CORPUS_FILE", tmp_path / "law" / "corpus.json")
+    corpus.save([])
+    before = uploads.STORE.read_bytes(), corpus.CORPUS_FILE.read_bytes()
+    before_files = set(tmp_path.rglob("*"))
+
+    def fail_replace(self, target):
+        raise OSError("injected rename failure")
+
+    monkeypatch.setattr(Path, "replace", fail_replace)
+    with pytest.raises(OSError):
+        uploads.remove("내규.pdf")
+    with pytest.raises(OSError):
+        corpus.save([NS(name="법", key_name="법", law_id="1", level="법률", serial="1", effective_date=None,
+                        promulgation_no="", articles=[], annexes=[], delegations=[])])
+    assert (uploads.STORE.read_bytes(), corpus.CORPUS_FILE.read_bytes()) == before
+    assert set(tmp_path.rglob("*")) == before_files
+    corpus.load_corpus.cache_clear()
+
+
 @pytest.mark.asyncio
 async def test_cleanup_failure_does_not_revert_successful_replacement(store, monkeypatch):
     vec = FakeVectors()

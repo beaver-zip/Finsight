@@ -11,6 +11,7 @@ from functools import lru_cache
 
 from lxml import etree
 
+from app.core.law import uploads
 from app.core.law.client import LawClient
 from app.core.law.parser import LawDoc, parse, parse_delegations
 from app.domain.models import Annex, Article
@@ -50,14 +51,13 @@ async def fetch_all(client: LawClient) -> list[LawDoc]:
 
 
 def save(docs: list[LawDoc]) -> None:
-    CORPUS_FILE.parent.mkdir(parents=True, exist_ok=True)
     data = [{"name": d.name, "key_name": d.key_name, "law_id": d.law_id, "level": d.level, "serial": d.serial,
              "effective_date": d.effective_date.isoformat() if d.effective_date else None,
              "promulgation_no": d.promulgation_no,
              "articles": [a.model_dump(mode="json") for a in d.articles],
              "annexes": [x.model_dump(mode="json") for x in d.annexes],
              "delegations": d.delegations} for d in docs]
-    CORPUS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=1))
+    uploads.atomic_write(CORPUS_FILE, json.dumps(data, ensure_ascii=False, indent=1))
     load_corpus.cache_clear()
 
 
@@ -70,8 +70,6 @@ class Corpus:
 
     def get(self, key: str) -> Article | Annex | None:
         """코퍼스 조문·별표, 없으면 사용자가 올린 내규 조문."""
-        from app.core.law import uploads
-
         return self.articles.get(key) or self.annexes.get(key) or uploads.get_article(key)
 
     def level_of(self, law_key: str) -> str | None:
