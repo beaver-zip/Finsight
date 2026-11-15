@@ -89,9 +89,12 @@ def company_digest(rep: CompanyReport, limit_facts: int = 160) -> str:
     return "\n".join(lines)
 
 
-async def run_company(instruction: str, corp: CorpProfile, build: ReportBuilder) -> tuple[SubResult, EvidencePart]:
+async def run_company(instruction: str, corp: CorpProfile, build: ReportBuilder, *,
+                      skip_news: bool = False) -> tuple[SubResult, EvidencePart]:
     out = await build(corp.corp_code)
     rep = CompanyReport.model_validate(out["json"])
+    if skip_news:       # 같은 질문의 뉴스 과업도 기사에 n1~을 붙인다. 리포트(캐시) 기사와 ID가 겹치지 않게 뺀다
+        rep = rep.model_copy(update={"news": []})
     if rep.filing is None or not rep.metrics:
         return (SubResult(agent="company", content="", error=f"{corp.corp_name}의 정기보고서·재무 자료가 없다"),
                 EvidencePart())
