@@ -162,3 +162,22 @@ async def test_dart_client_status_codes_and_retries(monkeypatch):
     assert isinstance(out, DartError) and out.status == "503" and n == 4
     out, n = await _dart_calls(monkeypatch, 404)
     assert isinstance(out, DartError) and out.status == "404" and n == 1   # 4xx는 다시 불러도 같다
+
+
+async def test_filing_list_falls_back_to_previous_day_during_outage(monkeypatch, temp_cache):
+    # 어제 받은 목록이 만료된 뒤 오늘 OpenDART가 점검이면 어제 목록으로 최신 보고서를 고른다
+    from datetime import date
+
+    from app.core import cache as cache_module
+    from app.core.dart import filings
+    from app.domain.models import CorpProfile
+
+    now = time.time()
+    monkeypatch.setattr(cache_module.time, "time", lambda: now)
+    row = {"rcept_no": "20261114000001", "report_nm": "분기보고서 (2026.09)", "rcept_dt": "20261114"}
+    dart = FakeDart({"status": "000", "list": [row], "total_page": 1}, DartError("800", "시스템 점검"))
+    profile = CorpProfile(corp_code="c", corp_name="테스트", acc_mt=12)
+    first = await filings.latest_periodic(dart, profile, today=date(2026, 11, 15))
+    now += 86_400
+    again = await filings.latest_periodic(dart, profile, today=date(2026, 11, 16))
+    assert again == first and again.rcept_no == "20261114000001" and dart.calls == 2
