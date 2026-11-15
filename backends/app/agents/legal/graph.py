@@ -55,6 +55,7 @@ class LegalState(TypedDict, total=False):
     loops: int
     low_score: bool                 # 원래 질문 기준 리랭크 최고 점수가 임계값 미만(거절)
     q_score: float                  # 원래 질문과 시드 조문의 리랭크 최고 점수(거절 판정에 쓴다)
+    ext_raw: dict[str, float]       # 확장 후보 key → 홉 감점 전 리랭크 점수(재검색 루프에서 다시 계산하지 않는다)
     answer: LegalAnswer | None
     texts: dict[str, str]           # 답변에 넘긴 조문 key → 본문(검증용)
     errors: Annotated[list[str], operator.add]
@@ -120,14 +121,15 @@ async def expand(state: LegalState, config: RunnableConfig) -> dict:
     t, c = _tools(config), _cfg(config)
     seeds = state["seeds"]
     keys = [h.article.key for h in seeds]
+    raw = dict(state.get("ext_raw") or {})
     try:
-        ext = await t.expand_citations(state["question"], keys, hops=c.hops, lam=c.lam, limit=c.expand_limit)
+        ext = await t.expand_citations(state["question"], keys, hops=c.hops, lam=c.lam, limit=c.expand_limit, known=raw)
     except Exception as e:  # noqa: BLE001
         log.warning("인용 그래프 확장 실패: %s", e)
         return {"context": seeds[:c.context_k], "errors": [f"legal.expand: {type(e).__name__}: {e}"]}
     pool = [h.model_copy(update={"path": [h.article.key]}) for h in seeds] + ext
     ctx = sorted(pool, key=lambda h: -h.score)[:c.context_k]
-    return {"context": ctx}
+    return {"context": ctx, "ext_raw": raw}
 
 
 async def judge(state: LegalState, config: RunnableConfig) -> dict:

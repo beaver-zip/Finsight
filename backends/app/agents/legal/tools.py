@@ -125,14 +125,16 @@ class LawTools:
         return out
 
     async def expand_citations(self, query: str, keys: list[str], hops: int = 1, lam: float = 0.1,
-                               limit: int = 20) -> list[ArticleHit]:
-        """시드에서 참조·위임 엣지를 hops까지 따라간 후보(가까운 순 limit개)를 질문으로 리랭크하고 점수 − λ·hops로 정렬."""
+                               limit: int = 20, known: dict[str, float] | None = None) -> list[ArticleHit]:
+        """시드에서 참조·위임 엣지를 hops까지 따라간 후보(가까운 순 limit개)를 질문으로 리랭크하고 점수 − λ·hops로 정렬.
+        known(key → 감점 전 점수, 같은 질문)에 있는 후보는 다시 리랭크하지 않고, 새로 낸 점수를 채운다."""
         cands = await self.graph.expand(keys, hops=hops, limit=limit)
         corpus = self.corpus
         docs = [(c, corpus.get(c.key)) for c in cands]
         docs = [(c, d) for c, d in docs if d is not None]
         q = normalize(query)
-        scores = await rerank(q, [focus_text(d, q) for _, d in docs])
-        out = [ArticleHit(article=d, score=s - lam * c.hops, hops=c.hops, path=c.path)
-               for (c, d), s in zip(docs, scores)]
+        known = {} if known is None else known
+        new = [(c, d) for c, d in docs if c.key not in known]
+        known.update(zip([c.key for c, _ in new], await rerank(q, [focus_text(d, q) for _, d in new])))
+        out = [ArticleHit(article=d, score=known[c.key] - lam * c.hops, hops=c.hops, path=c.path) for c, d in docs]
         return sorted(out, key=lambda h: -h.score)
