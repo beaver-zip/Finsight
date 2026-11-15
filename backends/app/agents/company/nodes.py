@@ -147,28 +147,24 @@ async def regulatory_check(state: CompanyState, config: RunnableConfig) -> dict:
     if runner is None:      # 질문 LLM 호출 전에 확인한다. 결과를 버릴 호출에 비용을 쓰지 않는다
         return {"triggers": trig, "regulatory": [], "legal_texts": {},
                 "errors": ["regulatory: 법령 서브그래프가 연결되지 않아 규제 검토를 건너뛰었다"]}
-    questions = []
+    prompts = []
     name = state["corp"].corp_name
-    if "financial" in trig:
-        questions.append(FINANCIAL_QUESTION)
     if "news" in trig:
         art = max((n for n in state["news"] if n.aspect == "리스크·규제"), key=lambda n: n.score or 0)
-        q = await llm.structured(_Question, [{"role": "user", "content":
-            f"기업: {name}\n규제 관련 기사 제목: {art.title}\n요약: {' '.join(art.analysis.summary) if art.analysis else ''}\n\n"
-            "이 기사와 관련해 전자금융거래법령에서 확인할 질문 1개를 한 문장으로 써라."}],
-            effort="medium", task="company.reg_question")
-        questions.append(q.question)
+        prompts.append(f"기업: {name}\n규제 관련 기사 제목: {art.title}\n요약: {' '.join(art.analysis.summary) if art.analysis else ''}\n\n"
+                       "이 기사와 관련해 전자금융거래법령에서 확인할 질문 1개를 한 문장으로 써라.")
     if "disclosure" in trig:
         d = next(d for d in state["disclosures"] if any(w in d.report_nm for w in SANCTION_WORDS))
-        q = await llm.structured(_Question, [{"role": "user", "content":
-            f"기업: {name}\n제재 관련 공시 제목: {d.report_nm} ({d.rcept_dt})\n\n"
-            "이 공시와 관련해 전자금융거래법령에서 확인할 질문 1개를 한 문장으로 써라."}],
-            effort="medium", task="company.reg_question")
-        questions.append(q.question)
-    findings, texts = [], {}
-    for q in questions[:3]:
+        prompts.append(f"기업: {name}\n제재 관련 공시 제목: {d.report_nm} ({d.rcept_dt})\n\n"
+                       "이 공시와 관련해 전자금융거래법령에서 확인할 질문 1개를 한 문장으로 써라.")
+    asked = await asyncio.gather(*(llm.structured(_Question, [{"role": "user", "content": p}], effort="medium",
+                                                  task="company.reg_question") for p in prompts))
+    questions = ([FINANCIAL_QUESTION] if "financial" in trig else []) + [q.question for q in asked]
+    for q in questions:
         _progress("company.regulatory", q)
-        answer, t = await runner(q)
+    results = await asyncio.gather(*(runner(q) for q in questions))   # 러너는 호출마다 상태를 새로 만든다
+    findings, texts = [], {}
+    for q, (answer, t) in zip(questions, results):
         findings.append(LegalFinding(question=q, answer=answer))
         texts.update(t)
     return {"triggers": trig, "regulatory": findings, "legal_texts": texts}
