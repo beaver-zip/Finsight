@@ -365,3 +365,26 @@ def test_dedupe_phrase():
     assert dedupe_phrase("영업이익률은 42개 분기 중 42개 분기 중 5위입니다") == "영업이익률은 42개 분기 중 5위입니다"
     assert dedupe_phrase("45일 마다 바꾼다") == "45일 마다 바꾼다"
     assert dedupe_phrase("매출과 매출액") == "매출과 매출액"
+
+
+async def test_run_news_uses_kst_date_like_report(monkeypatch):
+    # 리포트의 get_disclosures는 KST 날짜를 쓴다. 뉴스 과업이 서버 날짜(UTC 호스트의 00–09시 KST)를 쓰면 공시 목록이
+    # 달라져 run_pipeline 단일 실행 키가 어긋나고 같은 기업 파이프라인이 두 번 돈다
+    from datetime import datetime
+
+    from app.agents.news.pipeline import NewsResult
+    from app.agents.orchestrator import subagents as S
+    from app.domain.dates import KST
+
+    seen = {}
+
+    async def disclosures(dart, corp_code, **kw):
+        seen.update(kw)
+        return []
+
+    async def pipeline(corp, disc, **kw):
+        return NewsResult(items=[], note=None, candidates=[], researched=False)
+    monkeypatch.setattr(S.dart_filings, "disclosures", disclosures)
+    monkeypatch.setattr(S, "run_pipeline", pipeline)
+    await S.run_news(CorpProfile(corp_code="1", corp_name="가"), dart=None, http=None)
+    assert seen.get("today") == datetime.now(KST).date()
