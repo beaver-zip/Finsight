@@ -5,7 +5,7 @@
 - 방법: `ponytail-audit`. 7개 영역(재무 계산, 보고서 생성, 외부 데이터 클라이언트, 법령 RAG, 채팅·뉴스, 프론트, 저장소 전체)을 영역별로 끝까지 읽고, 발견사항마다 별도 검증자가 코드를 다시 읽고 반박을 시도했다. 마지막에 누락 점검을 한 번 더 했다.
 - 가정한 부하: 한 사람이 로컬 uvicorn 서버 하나를 띄워 쓴다. 서버 안에서는 asyncio 작업과 LangGraph 분기가 병렬로 돈다.
 - 결과: 88개 발견, 반박으로 빠진 것 0개, 57개는 위치·심각도·수정 방법을 고쳐서 남김. 아래 본문은 그중 20개(관련 항목 묶음)다. 나머지는 [부록](#부록-본문에서-뺀-항목)에 있다.
-- 상태: 1·2·3·4·6번 **fixed**(2026-11-15, 아래 각 항목의 상태 줄). 나머지는 **open**. 수정 뒤 백엔드 `189 passed, 1 deselected`.
+- 상태(2026-11-15): 본문 20개와 부록 41개 모두 **fixed**. 일부 하위 제안은 이유를 적고 남겼다(20번, 부록 표의 상태 열). 머지 뒤 리뷰 수정까지 백엔드 `267 passed, 1 deselected`, 프론트 `npm test` 9개 통과·`npm run build`·`npm run lint` 오류 0. 전/후 수치는 [성능 비교](../testing/2026-11-15-performance.md).
 - 이전 감사: [2026-11-11 감사](2026-11-11-refactoring-audit.md)에서 고친 11개는 다시 올리지 않았다.
 
 ## 무엇을 실행했고 무엇을 못 했나
@@ -52,13 +52,14 @@ Finsight는 공시·주가·뉴스를 모아 상장사 분석 리포트를 만�
    - **Problem:** `(?m)^\s*제\s*(\d+)\s*조`가 줄 첫머리에 온 참조도 조 머리로 본다. PDF는 줄바꿈이 많아 이런 줄이 흔하다. 실행해 보면 제2조 본문 뒷부분이 제1조에 붙고, `\n제5조에 따른다.`는 제목 없는 가짜 `내규:5`를 만든다. 주석은 "앞 조문에 붙인다"인데 코드는 같은 번호 조문에 붙인다.
    - **Fix:** 머리를 고를 때 매치 바로 뒤가 조사·참조 표현이면 뺀다. `heads = [m for m in _HEAD.finditer(text) if not _REF.match(text, m.end())]`. `_HEAD` 끝에 부정 전방탐색을 붙이면 `제2조(정의)에 따른`에서 되돌아가 막지 못하니 쓰지 않는다. 입력 세 개로 회귀 테스트를 더한다.
    - **If we skip it:** 내규로 답할 때 인용 조문 번호와 본문이 엇갈린다.
+   - **상태:** fixed, `bc594de`. 테스트: `test_split_articles_keeps_line_start_reference_in_current_article`(입력 3개, 수정 전 실패).
 
 6. **기업+뉴스 복합 질문에서 기사 ID가 겹치고 뉴스 파이프라인이 두 번 돈다** (`backends/app/agents/orchestrator/subagents.py:L92-128`, `backends/app/agents/news/pipeline.py:L289`, `backends/app/agents/orchestrator/graph.py:L153-183`)
    - **What this is:** "삼성전자 실적이랑 최근 뉴스"처럼 묻으면 라우터가 company와 news 과업을 함께 병렬로 돌린다.
    - **Problem:** 두 쪽 모두 기사 ID를 `n1`~`n5`로 붙인다. 회사 리포트 기사(최대 7일 캐시)와 새 뉴스 기사는 거의 항상 달라서, 서로 다른 기사가 같은 `[n1]`이 된다. 근거 병합은 뒤의 값으로 덮어쓴다. 그래서 출처 링크가 다른 기사로 가고, 검증기는 다른 기사 본문으로 주장을 판정한다. 리포트 캐시가 없으면 같은 회사 뉴스 수집·분류·요약이 동시에 두 번 돌아 Tavily 크레딧과 LLM 비용도 두 배다.
    - **Fix:** news 과업이 같이 있으면 company 쪽은 `rep.news`를 비우고 쓴다. `Send` payload에 `skip_news`를 넣는 정도로 된다. 캐시가 없을 때 리포트 그래프의 `get_news`까지 건너뛰려면 같은 플래그를 `build_report`에 넘긴다. company+news 테스트 하나로 최종 출처에 `n1`이 한 번만 나오는지 본다.
    - **If we skip it:** 복합 질문 답의 출처가 틀리게 붙거나 맞는 주장이 검증에서 떨어지고, 뉴스 비용이 두 번 나간다.
-   - **상태:** ID 충돌은 fixed, `7a5d088` + `cdfce90`. 첫 커밋(리포트 기사 빼기)은 리포트 본문의 `[n1]` 표기가 남고 뉴스 실패 때 기사가 사라져서, 두 번째 커밋에서 리포트 기사 id를 목록·본문·news_ids에서 함께 n101~로 옮기는 방식으로 바꿨다. 테스트: `test_company_and_news_do_not_share_article_ids`(뉴스 성공·실패). **뉴스 이중 실행은 open:** 리포트 캐시가 없으면 리포트 생성 안의 뉴스 수집이 채팅 뉴스 과업과 따로 한 번 더 돈다. 리포트에 기사가 필요하고 캐시되는 결과물이라 이번에는 바꾸지 않았다.
+   - **상태:** ID 충돌은 fixed, `7a5d088` + `cdfce90`. 첫 커밋(리포트 기사 빼기)은 리포트 본문의 `[n1]` 표기가 남고 뉴스 실패 때 기사가 사라져서, 두 번째 커밋에서 리포트 기사 id를 목록·본문·news_ids에서 함께 n101~로 옮기는 방식으로 바꿨다. 테스트: `test_company_and_news_do_not_share_article_ids`(뉴스 성공·실패). 뉴스 이중 실행도 fixed, `c1ab187`: 같은 기업·공시·설정으로 동시에 들어온 `run_pipeline` 호출은 한 실행을 나눠 쓴다. 테스트: `test_concurrent_pipelines_for_same_corp_share_one_run`. 한계(`shortcut:` 주석): 공유 실행의 비용은 먼저 시작한 요청의 `cost_usd`에만 잡힌다.
 
 ## Should fix
 
@@ -67,72 +68,84 @@ Finsight는 공시·주가·뉴스를 모아 상장사 분석 리포트를 만�
    - **Problem:** `gather(return_exceptions=True)` 뒤 `isinstance` 필터가 예외를 버리고, `_snap`은 한도 초과(020)·타임아웃을 INFO 로그만 남기고 `None`으로 바꾼다. `errors`에는 아무것도 남지 않는다. `_cacheable`은 `errors`를 보지 않으므로, 한 분기 실패로 빈 리포트(4분기 값도 같이 빔)가 7일 캐시된다. 강제 새로고침 방법도 없다.
    - **Fix:** 버린 예외와 실패한 분기를 `err`에 `collect.` 접두어로 남긴다. `_cacheable`(또는 TTL)은 `collect.` 오류가 있으면 1시간 같은 짧은 TTL로 낮춘다. 아예 캐시하지 않으면 매번 실패하는 회사가 요청마다 LLM 비용을 낸다. `_snap`의 try/except만 지우면 한 분기 실패로 이력 전체가 비니 그렇게 하지 않는다.
    - **If we skip it:** 잠깐의 DART 장애가 일주일짜리 빈 리포트로 남고, 사용자는 이유를 모른다.
+   - **상태:** fixed, `2d8c32f`. 버린 예외와 실패한 분기를 `collect.` 오류로 남기고, 그런 리포트는 1시간만 캐시한다. 테스트: `test_quarter_outage_keeps_other_quarters_and_is_reported`, `test_report_with_collect_failure_is_cached_briefly`.
 
 8. **일시 오류나 빈 응답을 너무 오래 캐시하고, 서버를 켤 때 예비 캐시를 지운다** (`backends/app/core/dart/shares.py:L35-46`, `backends/app/core/search/extract.py:L22-58`, `backends/app/core/law/client.py:L62-71`, `backends/app/main.py:L34`)
    - **What this is:** 외부 응답을 SQLite 캐시에 둔다. 재무제표는 지난 감사에서 빈 응답 5분 규칙을 넣었다.
    - **Problem:** 같은 규칙이 다른 곳에는 없다. 주식 수·배당 빈 응답은 만료 없이 저장해, 보고서 제출 당일 한 번 부르면 그 분기는 영원히 "없음"이다. 기사 본문 수집은 503·타임아웃 결과도 7일 저장해서, 발행일이 없는 그 기사는 일주일 동안 후보에서 빠진다. 법령 API는 200이면 오류 본문도 저장하고 키에 OC가 없다. 그래서 키를 고친 뒤에도 캐시된 오류를 읽는다. 또 `main.py`의 `purge_expired()`가 시작할 때 만료 행을 지워, "장애 때는 만료 캐시라도 쓴다"는 `cached()` 규칙의 예비값을 없앤다. `corp_list`만 `cached()`를 안 쓰는 것도 같은 문제다.
    - **Fix:** `shares.py`는 `ttl_s=None if rows else 300` 한 줄. `extract.py`는 예외·5xx·429일 때 캐시하지 않는다. 법령 검색은 `<resultCode>00</resultCode>`가 없으면 `LawApiError`를 낸다(`scripts/check_keys.py`와 같은 기준). `purge_expired` 호출과 메서드를 지우고, `corp_list`를 `cached("dart.corplist", ...)`로 감싼다.
    - **If we skip it:** 한 번의 순간 장애가 며칠, 또는 영구적인 데이터 누락으로 남는다.
+   - **상태:** fixed. 주식 수·배당 빈 응답 5분 `69ef86f`, 기사 본문 일시 오류 비캐시 `9370107`, 법령 검색 실패 본문 비캐시 `f648acb`, `purge_expired` 제거와 `corp_list` 만료 대체 `f1db7e2`. 테스트: `test_share_counts_empty_answer_expires`, `test_article_transient_failure_is_not_cached`, `test_failed_search_body_is_not_cached`, `test_corp_list_uses_expired_list_when_dart_is_down`. 머지 뒤 리뷰에서 날짜 키 줄이 끝없이 쌓이는 것을 찾아, 시작할 때 만료된 지 7일 지난 줄만 지우도록 했다(`fae98f2`). 한계: 오래 켜 둔 서버에서는 재시작 전까지 쌓인다.
 
 9. **같은 이름으로 다시 올리면 적재 전에 원본 PDF를 덮어쓴다** (`backends/app/core/law/uploads.py:L44-53`, `backends/app/api/documents.py:L52-106`)
    - **What this is:** 업로드는 파일을 저장하고, 등록 단계가 그 파일을 읽어 벡터를 바꾼다. 지난 감사에서 벡터·메타데이터는 실패해도 보존하게 고쳤다.
    - **Problem:** `save_file`이 `FILES/<이름>`에 바로 덮어쓴다. 스캔 PDF라 적재가 실패하면 검색은 옛 문서인데 내려받기는 새 파일을 준다. 옛 원본은 사라진다.
    - **Fix:** 이미 등록된 이름이면 `<이름>.pending`에 쓰고, `uploads.put` 성공 뒤 `replace`로 바꾼다. 실패하면 pending을 남겨 재시도할 수 있게 한다. 교체 실패 테스트에 "원본 바이트가 그대로다" 한 줄을 넣는다.
    - **If we skip it:** 실패한 교체 한 번으로 원본 내규 PDF를 잃는다.
+   - **상태:** fixed, `a972b63`. 등록된 이름이면 `<이름>.pending`에 쓰고 적재 성공 뒤에만 교체한다. 테스트: `test_failed_replacement_preserves_old_document_and_retry`(원본 바이트 확인 추가).
 
 10. **문체 지적만 남아도 "검증 실패"가 되어 경고가 뜨고 매번 다시 만든다** (`backends/app/agents/company/nodes.py:L204-216, L245-251`, `backends/app/api/report.py:L67-69`)
     - **What this is:** 리포트 문장을 검증하고 실패한 블록을 뺀다. `finalize`는 style 지적을 실패로 보지 않는다.
     - **Problem:** `passed=not issues`가 style 지적까지 세서, 소제목이 차트 제목과 비슷하거나 금지 어미가 하나 남으면 `passed=False`가 된다. 그러면 빠진 문장이 없는데도 "근거 문제가 남은 문장은 제외했습니다" 경고가 뜨고, 캐시하지 않아 다음 요청 때 작성·검증·재작성 2번을 다시 돈다.
     - **Fix:** 경고와 `_cacheable`을 `[i for i in ver.issues if i.type != "style"]` 기준으로 정한다. style만 남은 회귀 테스트 하나를 더한다.
     - **If we skip it:** 틀린 경고가 뜨고, 같은 기업을 열 때마다 유료 파이프라인이 다시 돈다.
+    - **상태:** fixed, `fb263a0`. 테스트: `test_style_only_issues_keep_text_without_warning_and_are_cached`.
 
 11. **검증 재사용 캐시가 문장만 키로 써서 근거 변경을 무시한다** (`backends/app/agents/verifier.py:L173-185`)
     - **What this is:** 재작성 루프에서 이미 판정한 주장은 다시 LLM에 보내지 않는다.
     - **Problem:** 키가 `c.text`뿐이다. 재작성이 같은 문장에 `metric_ids`만 채워 와도 예전 "근거 없음" 판정을 그대로 받아 결국 빈 제목이 된다. 반대로 `news_ids`를 지웠는데 예전 "통과"가 남아 근거 없는 주장이 통과할 수 있다. 채팅 검증도 같은 함수를 쓴다.
     - **Fix:** 키를 `c.model_dump_json(exclude={"id"})`로 바꾼다. 두 곳만 고치면 된다. 근거 ID만 바뀐 주장을 다시 판정하는 테스트 하나를 더한다.
     - **If we skip it:** 재작성이 고친 내용을 검증이 못 보고, 반대로 근거가 빠진 문장이 통과할 수 있다.
+    - **상태:** fixed, `5a7f5e0`. 키는 `c.model_dump_json(exclude={'id'})`. 테스트: `test_judged_cache_rejudges_claim_when_only_evidence_ids_change`.
 
 12. **되묻기 뒤 합성이 원래 질문 대신 짧은 답을 질문으로 쓴다** (`backends/app/agents/orchestrator/graph.py:L77-81, L104-106, L197, L231`)
     - **What this is:** 라우터가 "어느 회사인가요?"라고 되물으면 사용자 답을 메시지에 붙이고 다시 라우팅한다.
     - **Problem:** 합성과 재작성은 `_question`(마지막 사람 메시지)을 쓴다. "그 회사 영업이익 추이는?" → "카카오뱅크"이면 합성 프롬프트가 `질문: 카카오뱅크`가 되어 일반 요약을 쓴다. 라우터가 지시어를 풀어 쓴 `SubTask.instruction`은 합성에 쓰이지 않는다.
     - **Fix:** 합성·재작성 질문을 `"\n".join(t.instruction for t in state["route"].sub_tasks)`로 바꾸고 `_question`을 지운다. 되묻기 경로 테스트를 하나 더한다(지금 없음).
     - **If we skip it:** 되묻기와 후속 질문의 답이 질문 의도에서 벗어난다.
+    - **상태:** fixed, `849a614`. 테스트: `test_router_clarification_synthesizes_rewritten_question`.
 
 13. **기사 요약 하나가 API 오류를 내면 뉴스 결과 전체가 사라진다** (`backends/app/agents/news/pipeline.py:L156-176, L281-288`)
     - **What this is:** 고른 기사 5건을 병렬로 요약하고, 실패한 건은 다음 순위 기사로 채운다.
     - **Problem:** `summarize`는 `StructuredOutputError`만 잡는다. SDK 재시도 뒤에도 남은 타임아웃·529가 `gather` 밖으로 나가 이미 성공한 요약 4건을 버린다. 진행 중이던 다른 요약은 취소되지 않아 비용은 그대로 나간다. 백업 요약도 하나씩 차례로 돈다.
     - **Fix:** except를 `(llm.StructuredOutputError, anthropic.APIError)`로 넓혀 그 기사만 `None` 처리한다. 예산 예외는 그대로 올린다. 백업 루프는 부족한 수만큼 `gather`로 돌린다.
     - **If we skip it:** API가 잠깐 불안정하면 뉴스가 통째로 빠지고 비용만 나간다.
+    - **상태:** fixed, `15a9568` + `884121a`. 요약 API 오류는 그 기사만 빼고, 백업 요약은 동시에 돈다. 테스트: `test_pipeline_researches_missing_aspects_and_fills_failed_summaries`(api_error 포함).
 
 14. **이벤트 루프를 수 초 막는 작업과 첫 요청 지연** (`backends/app/agents/company/nodes.py:L261`, `backends/app/agents/company/render.py:L748-784`, `backends/app/core/reranker.py:L17-46`)
     - **What this is:** 리포트 HTML에 쓰인 글자만 잘라 폰트를 넣는다. 법령 검색은 CrossEncoder 리랭커를 쓴다.
     - **Problem:** 폰트 서브셋이 async 노드 안에서 동기로 돌아 리포트마다 약 3.2~4초 동안 서버 전체(채팅 SSE 포함)가 멈춘다. 이 렌더 테스트 4개가 백엔드 테스트 시간의 절반 이상을 쓴다. 리랭커는 첫 법령 질문 때 torch import·모델 로딩으로 약 23초가 걸리고, 그동안 락을 잡아 다른 리랭크도 기다린다(이 Mac에서 측정).
     - **Fix:** `html = await asyncio.to_thread(render_report, ...)` 한 줄. `test_report_v2.py`에는 `font_faces`를 바꾸는 autouse 픽스처를 둔다(`test_report_verification.py`에 같은 방식이 있다). 리랭커는 lifespan에서 `law_tools`가 있을 때 락 안에서 `asyncio.to_thread(_model)`로 미리 올린다.
     - **If we skip it:** 리포트를 만들 때마다 서버가 몇 초씩 멈추고, 서버를 켠 뒤 첫 법령 답이 20초 이상 늦다.
+    - **상태:** fixed. 폰트 서브셋 렌더링을 `asyncio.to_thread`로 `bbf3853`, 리랭커는 법령 DB가 연결되면 lifespan에서 백그라운드로 예열 `3d8a0d5`. 테스트: `test_assemble_renders_off_the_event_loop`, `test_real_font_subset_is_embedded`, `test_warmup_loads_model_under_lock_and_swallows_errors`. 한계: 예열(약 15~20초) 중에 온 첫 법령 질문은 남은 시간만큼 기다린다.
 
 15. **리포트 규제 검토가 쓸데없는 LLM 호출을 하고 줄 서서 돈다** (`backends/app/agents/company/nodes.py:L141-174`, `backends/app/agents/company/graph.py:L27-29`)
     - **What this is:** 리스크 기사나 제재 공시가 있으면 질문을 만들어 법령 서브그래프에 묻는다.
     - **Problem:** 법령 러너가 없을 때(`legal_runner=None`, eval 기본값)도 질문 생성 LLM을 먼저 부르고 결과를 버린다. 러너가 있을 때는 질문 생성과 법령 그래프 실행을 하나씩 await하고, 쓰지 않는 `analyze` 결과를 기다린다.
     - **Fix:** runner `None` 검사를 질문 생성 전으로 올린다. 질문 생성과 `runner(q)`를 `asyncio.gather`로 돌리고, 그래프에서 `regulatory_check`를 `analyze`와 나란히 둔다(`add_edge(["analyze","regulatory_check"], "write")`).
     - **If we skip it:** 버려지는 LLM 비용이 나가고, 규제 트리거가 있는 기업의 리포트가 수십 초 늦다.
+    - **상태:** fixed. 러너가 없으면 질문 LLM 전에 건너뜀 `e5d8a78`, 규제 검토를 analyze와 나란히, 질문·법령 실행은 동시에 `d9ce1b6`. 테스트: `test_missing_legal_runner_skips_question_llm_calls`, `test_questions_and_legal_runs_are_concurrent_and_keep_order`, `test_regulatory_check_runs_alongside_analyze`.
 
 16. **채팅 체크포인터가 단계마다 전체 상태를 쌓고 지우지 않는다** (`backends/app/api/chat.py:L58-59`, `backends/app/main.py:L39-43`)
     - **What this is:** LangGraph가 대화 상태를 `state.sqlite`에 저장한다. 되묻기 재개에 필요하다.
     - **Problem:** 기본 durability가 단계마다 저장해서, 한 턴에 상위 체크포인트 약 10개와 하위 그래프(법령·리포트) 체크포인트까지 쌓인다. 측정으로는 2턴에 약 2.4MB였다. 프론트는 새로고침마다 새 thread를 만들고, 옛 thread를 지우는 코드는 없다.
     - **Fix:** `astream(..., durability="exit")` 한 줄. 측정으로는 같은 2턴이 108KB였고, 되묻기 재개도 정상이었다.
     - **If we skip it:** 질문마다 DB가 수백 KB~MB씩 커진다. 정답 문제는 아니고 디스크와 쓰기 시간 문제다.
+    - **상태:** fixed, `5c48e1a`. `durability="exit"`. 테스트: `test_clarification_interrupts_then_resume_streams_final`(하위 그래프 포함, 체크포인트 수 확인). 한계: 옛 thread를 지우는 코드는 여전히 없다.
 
 17. **프론트 채팅·보고서의 오류 처리 버그 3개** (`frontends/corp-advisor--app/src/api/chatStream.ts:L19`, `src/hooks/useChatStream.ts:L37-73`, `src/pages/Report.tsx:L161-178`)
     - **What this is:** 채팅은 SSE 스트림을 읽고, 보고서 화면은 백엔드 HTML을 받아 보여 준다.
     - **Problem:** (a) `/^data: (.*)$/m`의 `.`이 U+2028에서 멈춘다. 백엔드는 `ensure_ascii=False`라 이 글자를 그대로 보내므로, 기사에서 온 이 글자 하나로 답 대신 "답변을 가져오지 못했습니다"가 뜬다(node로 재현). (b) 채팅 화면을 떠나도 fetch를 끊지 않아, 백엔드가 결과를 버릴 LLM·Tavily 호출을 끝까지 한다. (c) 정기보고서가 없는 회사는 백엔드가 200과 빈 본문을 주고, 화면은 아무 안내 없이 검색 화면으로 돌아간다.
     - **Fix:** (a) `/^data: ([^\n]*)/m`과 테스트 하나. (b) `useEffect(() => () => abortRef.current?.abort(), [])`. 연결이 끊기면 Starlette가 생성기를 취소한다. (c) `const data = await response.text();` 다음 줄에 `if (!data.trim()) throw new Error("empty");`.
     - **If we skip it:** 드물게 답이 사라지고, 나간 화면의 비용이 계속 나가고, 빈 화면의 원인을 알 수 없다.
+    - **상태:** fixed. (a) U+2028 `2c1c235`, (b) 화면 이탈 시 fetch 중단 `dae2a69`, (c) 빈 보고서 안내 `6364fd1`. 테스트: (a)만 `tests/chat-stream.test.mjs`. (b)(c)는 React 훅·렌더 테스트 환경이 없어 자동 테스트가 없다.
 
 18. **쓰지 않는 backend·frontend 컨테이너 설정이 `.env`를 이미지에 넣고 8000 포트를 LAN에 연다** (`docker-compose.yml:L42-72`, `backends/Dockerfile`, `frontends/corp-advisor--app/Dockerfile`)
     - **What this is:** 문서상 실행은 `docker compose up -d weaviate neo4j`뿐이다. backend·frontend 서비스는 옛 설정이다.
     - **Problem:** 서비스 이름 없이 `docker compose up -d`를 하면 backend 이미지를 만든다. `.dockerignore`가 없어서 `backends/.env`(API 키)와 1.6GB `.venv`가 이미지 층에 들어간다. 컨테이너는 `0.0.0.0:8000`으로 떠서, 같은 와이파이의 누구나 인증 없는 `/report`, `/chat`으로 유료 API 예산을 쓸 수 있다.
     - **Fix:** 두 서비스와 Dockerfile 두 개를 지운다(참조하는 곳 없음). 남겨야 하면 `.dockerignore`를 두고 포트를 `127.0.0.1:8000:8000`으로 바꾼다.
     - **If we skip it:** 명령 하나만 잘못 쳐도 키가 이미지에 남고 유료 API가 네트워크에 열린다.
+    - **상태:** fixed, `1110b3c` + `b5cb8ea`. 두 서비스와 Dockerfile 두 개를 지웠다. 테스트: `test_infra_compose.py`(모든 포트가 127.0.0.1).
 
 ## Nice to have
 
@@ -141,12 +154,14 @@ Finsight는 공시·주가·뉴스를 모아 상장사 분석 리포트를 만�
     - **Problem:** 보고서 렌더러는 백엔드가 내지 않는 `<script>`를 다시 실행하고 v1 분기·CSS 약 75줄을 들고 있다. `ChatContext`의 localStorage 저장은 새로고침해도 복원하지 않으면서, 폰트가 든 큰 HTML을 매번 쓴다. 가짜 타자 효과는 16ms마다 모든 말풍선의 마크다운을 다시 파싱하고, 다음 답이 오면 앞 답을 처음부터 다시 친다. `tsc -b`는 루트 `tsconfig.json`만 읽어서 app/node 설정의 엄격 옵션이 아무 데서도 돌지 않는다. CI는 lint를 돌리지 않고, 지금 `npm run lint`는 `ChatContext.tsx` 때문에 실패한다. `@tailwindcss/typography`, `tailwind-scrollbar-hide`는 클래스 사용처가 없다.
     - **Fix:** 렌더러를 `dangerouslySetInnerHTML` 한 줄로 바꾸고 링크 새 탭 속성은 `render.py`의 `<a>`로 옮긴다. `ChatContext`를 지우고 Report는 `useState("")` 하나만 둔다. 타자 효과를 지우고 onFinal에서 완성본을 바로 넣는다. app 설정을 루트 tsconfig로 합치고 두 파일을 지운다. CI에 `npm run lint`를 더한다. 두 의존성을 지운다. 쓰지 않는 props와 `BASE_URL` 복사 7곳은 같이 정리한다.
     - **If we skip it:** 약 350줄의 죽은 코드가 남고, 긴 대화에서 화면이 버벅이고, 엄격 검사가 켜져 있다고 착각한다.
+    - **상태:** fixed. 타자 효과 제거 `092a2c9`, ChatContext·localStorage 제거 `1a571d2`, 렌더러 단순화와 v1 CSS 제거 `7a6c5b4`(링크 새 탭은 `render.py` `49fe5bc`), 엄격 tsconfig 합치기 `e138cd6`, CI lint `63616d4`, props·의존성 정리 `7c29425` + `bf8e772` + `f3df77b`, BASE_URL 한 곳 `053651d`. `npm run lint` 오류 1 → 0.
 
 20. **백엔드의 중복 경로와 죽은 코드** (`backends/app/api/report.py:L72-86, L129-169`, `backends/app/agents/company/analysis.py`, `backends/app/core/dart/*`, `backends/app/agents/company/render.py:L42-45, L623-626`, `backends/app/core/llm.py:L46-52`)
     - **What this is:** 리포트 API, 계산 모듈, DART 파서 곳곳의 군더더기다.
     - **Problem:** `/report/{code}/stream`은 `build_report`의 캐시·실행·결과 변환을 손으로 다시 만들었고, 프론트는 부르지 않는다. 지난 감사의 캐시 수정도 두 곳에 넣어야 했다. `analysis.py`에는 쓰기만 하고 읽지 않는 ctx 키 15곳이 있고, `Inputs`가 `Collected`의 필드 16개를 다시 적는다. 단위 정규식이 3번, 분기 키·날짜 파서가 2번씩 있고, `viewer.section`, `market.INDEX_SOURCES`, `NEWS_MODE`는 쓰는 곳이 없다. `render.sgn`·`_md`는 `fmt.signed`·`md`를 다시 만든 것이고, 회사명 정리와 기사 발췌 함수도 두 벌씩 있다. `langsmith`는 requirements에 있는데 없을 때의 대체 코드가 남아 있다.
     - **Fix:** 진행 표시가 필요 없으면 `report_stream`과 관련 테스트·README 줄을 지운다. 필요하면 진행 이벤트만 보내고 결과와 캐시는 `build_report`에 맡긴다. 나머지는 하나만 남기고 import해서 쓴다. `Inputs(Collected)` 상속은 `kw_only=True`가 있어야 깨지지 않는다.
     - **If we skip it:** 같은 규칙을 두 곳에서 고쳐야 하고, 1107줄 계산 파일에서 진짜 의존을 찾기 어렵다.
+    - **상태:** fixed. `/report/{code}/stream` 삭제 `7e477d4`, ctx 죽은 키 `74f040c`, `Inputs(Collected)` `11b09e1` + `059a07f`, dart 중복·죽은 코드 `093f133`, `render.sgn`·`_md` `2026a97`, 회사명 정리 `059a07f`, 기사 발췌 `6e1fcb1`, traceable 대체 코드 `1b55633`, `INDEX_SOURCES` 등 `3701c08` + `7d6e7e0`. 남김(dismissed): `original.py`의 단위표는 `prelim` 것을 쓰면 import 순환이 생기고 정규식을 합치면 파싱이 바뀌어 그대로 둔다. `fy_last` 두 곳과 `f`/`peers._f`는 계층이 달라 합치지 않았다.
 
 ## 판단
 
@@ -156,52 +171,73 @@ Finsight는 공시·주가·뉴스를 모아 상장사 분석 리포트를 만�
 
 **Not checked:** 실제 외부 API·DB·브라우저 동작, 부하. `eval/` 코드는 의존성(`scipy`, `yaml`이 requirements에 없음)만 봤다. `render.py`의 차트 함수 각각의 숫자 정확성은 전수 확인하지 않았다.
 
+## 머지 뒤 리뷰(2026-11-15)
+
+7개 브랜치를 합친 뒤 `706c7a5..4e77102` 변경을 다시 리뷰했다. 범위는 cross-branch, orchestrator-news-chat, legal(업로드 경로·.pending·삭제), report-pipeline·core-data(캐시 TTL·만료 대체값)였다. 지적마다 검증자 1명이 probe를 직접 돌려 재현되면 확정했다. 확정 17건(중복 2쌍 포함, 고유 15건)은 모두 fixed, 반박 2건은 고치지 않았다. 고친 뒤 백엔드는 `267 passed, 1 deselected`다.
+
+| 지적 | 상태 |
+| --- | --- |
+| 뉴스·공시·규제 노드가 일시 실패한 리포트도 7일 캐시 | fixed, `3f43920`. 예외로 남은 오류(`<노드>: <예외>: …`)만 1시간 TTL로 낮춘다. 법령 러너 미연결 안내는 7일 캐시를 그대로 둔다. 테스트: `test_report_missing_failed_branch_is_cached_briefly`, `test_report_without_legal_runner_keeps_week_cache` |
+| 원문으로 못 채운 새 분기 장애가 오류에 안 남아 7일 캐시 | fixed, `1b27582`. 테스트: `test_new_quarter_original_outage_is_reported` |
+| 시세 조회 실패를 `[]`로 1시간 캐시, 시세가 원래 없는 종목은 매시간 재생성 | fixed, `4fd7f47`. 실패는 캐시하지 않고 `collect.price` 오류로 남기며, 시세가 없다는 실제 답은 오류가 아니다. 테스트: `test_daily_close_failure_is_raised_and_not_cached`, `test_listed_stock_without_price_data_is_not_partial`, `test_price_fetch_failure_is_partial`, `test_peer_row_survives_price_outage` |
+| 공시 목록 캐시 키에 오늘 날짜가 들어가 다음 날 점검 때 만료 대체값이 없음 | fixed, `be4a627`. 테스트: `test_filing_list_falls_back_to_previous_day_during_outage` |
+| `purge_expired` 삭제로 날짜 키 캐시 줄이 끝없이 쌓임 | fixed, `fae98f2`. 시작할 때 만료된 지 7일 지난 줄만 지운다. 테스트: `test_startup_purge_keeps_recent_stale_fallback` |
+| 재무 스냅샷 키가 history와 피어 자기 행에서 달라 같은 재무를 두 번 받음 | fixed, `016c7d6`. 테스트: `test_self_peer_row_shares_history_snapshot_keys`(호출 6 → 3) |
+| 교체 적재 중 삭제, 같은 파일 동시 적재, 적재 중 새 업로드 | fixed, `178e3d9` + `d182c5a`. 이름별 `asyncio.Lock`으로 적재·삭제·업로드를 직렬화한다. 테스트: `test_delete_during_replacement_register_leaves_nothing`, `test_concurrent_registers_of_replacement_keep_one_generation`, `test_upload_during_register_stays_pending`. 한계: 프로세스 하나 안에서만 맞다(`shortcut:` 주석) |
+| 대문자 `.PDF` 미적재 파일이 목록에 없음 | fixed, `2fb554d`. 테스트: `test_unregistered_upper_case_pdf_is_listed` |
+| 요약이 모두 API 오류면 뉴스 0건을 오류 없이 돌려줌 | fixed, `dd375f6`. 테스트: `test_pipeline_raises_when_every_summary_hits_api_error` |
+| 뉴스 단일 실행이 다른 요청의 토큰 예산 예외를 넘겨줌 | fixed, `dc58220`. 같은 요청 안에서만 실행을 나눈다. 테스트: `test_single_flight_is_not_shared_across_requests` |
+| `</article>` 제거가 한 번·대소문자 구분이라 경계를 닫을 수 있음 | fixed, `d533ba7`. 테스트: `test_summarize_marks_article_body_as_data`(중첩·대문자·공백) |
+| 채팅 뉴스 과업이 서버 로컬 날짜로 공시를 받아 리포트와 단일 실행 키가 다름 | fixed, `677b0da`. 테스트: `test_run_news_uses_kst_date_like_report` |
+| 재무 API가 정정 전 접수번호를 주면 신호 없이 옛 숫자를 캐시 | dismissed: 동작은 재현되지만 이번 변경 전에도 같았다(정정 전 숫자를 7일 캐시). 이번 수정(`9f1e6b5`)은 반복 재조회만 없앴다. `docs/testing/2026-11-11-financial-cache.md`에 한계로 적혀 있다 |
+| 실패한 교체가 남긴 `.pending`을 다음 적재가 집어감 | dismissed: `.pending`은 사용자가 마지막에 올린 파일이라 다시 적재해도 같은 이유로 실패하는 것이 맞다. 원본은 등록·검색·내려받기가 그대로 된다(9번 수정 방식) |
+
 ## 부록: 본문에서 뺀 항목
 
-검증을 통과했지만 작거나 영향이 좁아 본문에서 뺀 항목이다. 모두 open이다.
+검증을 통과했지만 작거나 영향이 좁아 본문에서 뺀 항목이다. 상태 열은 2026-11-15 기준이다.
 
-| 분류 | 종류 | 제목 | 위치 |
-| --- | --- | --- | --- |
-| Should | bug | 잠정실적 발표 횟수 라벨의 '최근 제외'가 틀릴 때가 있다 | `backends/app/agents/company/analysis.py:L1008-L1012` |
-| Should | test | render의 HTML 이스케이프·URL 필터를 지키는 테스트가 없음 | `backends/app/agents/company/render.py:L38-39` |
-| Should | bug | corp_list만 만료 캐시 대체를 안 써서 점검 때 기업 검색이 통째로 실패 | `backends/app/core/dart/corp.py:L15-31` |
-| Should | bug | 우선주 후보가 5·7·9만 봐서 신형 우선주(…K)를 놓치고, 실패한 시세는 매번 다시 부름 | `backends/app/core/market.py:L40-55` |
-| Should | test | OpenDART 상태 처리·보고서명 해석·주식 수 파서에 테스트가 없음 | `backends/app/core/dart/client.py:L41-88` |
-| Should | speed | 재검색을 2번 한 뒤의 세 번째 충분성 판단 LLM 호출은 결과와 상관없이 항상 '답변'으로 간다 | `backends/app/agents/legal/graph.py:L133-L158` |
-| Should | risk | 업로드 메타데이터 삭제와 코퍼스 저장은 원자적으로 쓰지 않는다(put만 임시 파일+교체를 쓴다) | `backends/app/core/law/uploads.py:L136-L165` |
-| Should | bug | revise 실패 때 넣는 passed=True는 바로 덮어써지고, 유료 재작성을 한 번 더 부른다 | `backends/app/agents/orchestrator/graph.py:L228-236, L204-225, L318` |
-| Should | test | 기업 후보 고르기와 되묻기 실패 분기에 테스트가 없다 | `backends/app/agents/orchestrator/graph.py:L100-150` |
-| Should | risk | 업로드·삭제가 실패해도 화면에 아무 안내가 없다 | `frontends/corp-advisor--app/src/components/steps/UploadModal.tsx:L33-L34` |
-| Should | speed | 기업 목록 약 11만 줄을 조회할 때마다 SQLite에서 JSON으로 다시 읽는다 | `backends/app/core/dart/corp.py:L15-31, L38-55, L66-73` |
-| Should | test | 채팅 기업 후보 규칙(listed_candidates)을 지키는 테스트가 없다 | `backends/app/agents/orchestrator/graph.py:L133-150` |
-| Nice | bug | 순이익 대표 차트가 연결 순이익과 지배주주 순이익을 섞는다 | `backends/app/agents/company/analysis.py:L446` |
-| Nice | lean | Metric 값 기반 표시 경로와 출처 필드는 쓰이지 않는다 | `backends/app/domain/binding.py:L14, L26-L41, L125-L128` |
-| Nice | lean | 같은 일을 하는 작은 헬퍼가 여러 곳에 있다 | `backends/app/agents/company/analysis.py:L104-L109, L261-L262, L463, L837-L838, L694-L699` |
-| Nice | bug | 핵심 수치 카드: 52주 카드가 지수 실패에 묶여 있고, 시가총액 반올림 규칙이 둘이다 | `backends/app/agents/company/analysis.py:L245, L252-L258, L1034-L1058 (지수 실패 경로: collect.py:L89)` |
-| Nice | speed | 검증의 근거 판정과 투자 권유 판정 LLM 호출이 차례로 실행됨 | `backends/app/agents/verifier.py:L180` |
-| Nice | bug | 뉴스 노드가 공시 목록을 따로 다시 불러 DART를 중복 호출함 | `backends/app/agents/company/nodes.py:L93` |
-| Nice | lean | 작은 죽은 코드와 중복 분기(_cell 튜플, Units.s, 오류 매핑 두 벌) | `backends/app/agents/company/render.py:L560-566` |
-| Nice | bug | cited()가 max_tokens 16000인데 스트리밍을 안 써서 120초 타임아웃 위험이 있음 | `backends/app/core/llm.py:L167-196 (비교: llm.py:L131-137), 호출처 backends/app/agents/legal/answer.py:L119-125` |
-| Nice | speed | 기업 검색마다 20MB 기업 목록 JSON을 이벤트 루프에서 다시 파싱 | `backends/app/core/dart/corp.py:L15-74` |
-| Nice | scale | API의 rcept_no가 목록과 다르면 재무 캐시가 매번 무시됨 | `backends/app/core/dart/financials.py:L60-80` |
-| Nice | speed | 원문 재무제표를 한 분기씩 차례로 받고 큰 XML을 루프 스레드에서 파싱 | `backends/app/core/dart/history.py:L112-132` |
-| Nice | bug | 적재에 실패했거나 아직 적재하지 않은 업로드 파일은 목록에도 안 나오고 지울 수도 없다 | `backends/app/api/documents.py:L109-L127` |
-| Nice | bug | 관리 토큰 헤더에 ASCII가 아닌 글자가 있으면 401이 아니라 500이 난다 | `backends/app/api/admin.py:L20-L25` |
-| Nice | scale | 업로드 파일 전체를 메모리로 읽은 뒤에야 20MB 제한을 검사한다 | `backends/app/api/documents.py:L55-L58` |
-| Nice | lean | 같은 일을 하는 헬퍼가 여러 곳에 있다: 공백 제거 키와 별표 번호 표기 | `backends/app/core/law/parser.py:L44-L45` |
-| Nice | lean | LawTools.get_article과 search_law(levels)는 운영 코드에서 쓰지 않는다 | `backends/app/agents/legal/tools.py:L111-L129` |
-| Nice | test | OC 인증키를 가리는 scrub과 법령 API 재시도 분기에 테스트가 없다 | `backends/app/core/law/client.py:L21-L60` |
-| Nice | speed | 재검색 루프마다 이미 점수를 낸 확장 후보를 같은 질문으로 다시 리랭크한다 | `backends/app/agents/legal/graph.py:L101-L130` |
-| Nice | lean | 쓰이지 않는 인자·설정 조회·결과 필드 | `backends/app/agents/orchestrator/subagents.py:L92, L120-123` |
-| Nice | lean | 같은 일을 하는 코드가 두 곳에 있다 | `backends/app/api/chat.py:33-34 vs backends/app/api/report.py:129-130` |
-| Nice | test | 채팅 SSE 생성기에 테스트가 없다 | `backends/app/api/chat.py:L45-85` |
-| Nice | test | 뉴스 재검색·백업 요약 분기에 테스트가 없다 | `backends/app/agents/news/pipeline.py:L250-297` |
-| Nice | risk | 기사 본문 속 지시문을 막는 경계가 없다 | `backends/app/agents/news/pipeline.py:L96-106, L114-118, L139-141, L157` |
-| Nice | bug | 기업 검색 응답이 늦게 오면 이전 검색 결과가 새 결과를 덮어쓴다 | `frontends/corp-advisor--app/src/hooks/useCorpData.ts:L39-L72` |
-| Nice | lean | 업로드 모달의 단계 state가 Chatbot에 올라가 있고, 파일 이름도 오타(TirggerModal)다 | `frontends/corp-advisor--app/src/pages/Chatbot.tsx:L33-L45, L232-L246` |
-| Nice | lean | 기업명 검색 정렬을 백엔드와 프론트가 똑같이 두 번 한다 | `frontends/corp-advisor--app/src/hooks/useCorpData.ts:L12-27, L61` |
-| Nice | lean | scipy는 이항검정 하나에만 쓰고, eval이 쓰는 yaml·scipy가 requirements에 없다 | `backends/eval/stats.py:L31-41` |
-| Nice | lean | 쓰지 않는 상수와 한 줄짜리 중복 몇 개 | `backends/app/core/market.py:L9` |
-| Nice | speed | embed()가 호출마다 새 HTTP 연결을 만들고, 세마포어가 있는데도 배치를 하나씩 보낸다 | `backends/app/core/embeddings.py:L13-L14, L25, L28-L39` |
+| 분류 | 종류 | 제목 | 위치 | 상태 |
+| --- | --- | --- | --- | --- |
+| Should | bug | 잠정실적 발표 횟수 라벨의 '최근 제외'가 틀릴 때가 있다 | `backends/app/agents/company/analysis.py:L1008-L1012` | fixed, `17e4387` |
+| Should | test | render의 HTML 이스케이프·URL 필터를 지키는 테스트가 없음 | `backends/app/agents/company/render.py:L38-39` | fixed, `49fe5bc` |
+| Should | bug | corp_list만 만료 캐시 대체를 안 써서 점검 때 기업 검색이 통째로 실패 | `backends/app/core/dart/corp.py:L15-31` | fixed, `f1db7e2` |
+| Should | bug | 우선주 후보가 5·7·9만 봐서 신형 우선주(…K)를 놓치고, 실패한 시세는 매번 다시 부름 | `backends/app/core/market.py:L40-55` | fixed, `fa490a9` |
+| Should | test | OpenDART 상태 처리·보고서명 해석·주식 수 파서에 테스트가 없음 | `backends/app/core/dart/client.py:L41-88` | fixed, `871229f` |
+| Should | speed | 재검색을 2번 한 뒤의 세 번째 충분성 판단 LLM 호출은 결과와 상관없이 항상 '답변'으로 간다 | `backends/app/agents/legal/graph.py:L133-L158` | fixed, `99d7a85` |
+| Should | risk | 업로드 메타데이터 삭제와 코퍼스 저장은 원자적으로 쓰지 않는다(put만 임시 파일+교체를 쓴다) | `backends/app/core/law/uploads.py:L136-L165` | fixed, `5c8c32b` |
+| Should | bug | revise 실패 때 넣는 passed=True는 바로 덮어써지고, 유료 재작성을 한 번 더 부른다 | `backends/app/agents/orchestrator/graph.py:L228-236, L204-225, L318` | fixed, `669e4d0` |
+| Should | test | 기업 후보 고르기와 되묻기 실패 분기에 테스트가 없다 | `backends/app/agents/orchestrator/graph.py:L100-150` | fixed, `3a9e5ae` |
+| Should | risk | 업로드·삭제가 실패해도 화면에 아무 안내가 없다 | `frontends/corp-advisor--app/src/components/steps/UploadModal.tsx:L33-L34` | fixed, `1152a41` |
+| Should | speed | 기업 목록 약 11만 줄을 조회할 때마다 SQLite에서 JSON으로 다시 읽는다 | `backends/app/core/dart/corp.py:L15-31, L38-55, L66-73` | fixed, `ba81252` |
+| Should | test | 채팅 기업 후보 규칙(listed_candidates)을 지키는 테스트가 없다 | `backends/app/agents/orchestrator/graph.py:L133-150` | fixed, `3a9e5ae` |
+| Nice | bug | 순이익 대표 차트가 연결 순이익과 지배주주 순이익을 섞는다 | `backends/app/agents/company/analysis.py:L446` | fixed, `9dadba0` |
+| Nice | lean | Metric 값 기반 표시 경로와 출처 필드는 쓰이지 않는다 | `backends/app/domain/binding.py:L14, L26-L41, L125-L128` | fixed, `92cb493` + `059a07f` (`find_line`의 Found·Method 정리는 dismissed: 범위 밖 파일 7곳을 고쳐야 하고 얻는 것이 적다) |
+| Nice | lean | 같은 일을 하는 작은 헬퍼가 여러 곳에 있다 | `backends/app/agents/company/analysis.py:L104-L109, L261-L262, L463, L837-L838, L694-L699` | fixed, `88002f0` (`fy_last` 두 곳은 계산 순서 의존을 만들지 않으려고 남김) |
+| Nice | bug | 핵심 수치 카드: 52주 카드가 지수 실패에 묶여 있고, 시가총액 반올림 규칙이 둘이다 | `backends/app/agents/company/analysis.py:L245, L252-L258, L1034-L1058 (지수 실패 경로: collect.py:L89)` | fixed, `4baf1d1` |
+| Nice | speed | 검증의 근거 판정과 투자 권유 판정 LLM 호출이 차례로 실행됨 | `backends/app/agents/verifier.py:L180` | fixed, `f714bde` |
+| Nice | bug | 뉴스 노드가 공시 목록을 따로 다시 불러 DART를 중복 호출함 | `backends/app/agents/company/nodes.py:L93` | fixed, `af4fa29` |
+| Nice | lean | 작은 죽은 코드와 중복 분기(_cell 튜플, Units.s, 오류 매핑 두 벌) | `backends/app/agents/company/render.py:L560-566` | fixed, `d9ce1b6` + `0619012` + `44506ba` |
+| Nice | bug | cited()가 max_tokens 16000인데 스트리밍을 안 써서 120초 타임아웃 위험이 있음 | `backends/app/core/llm.py:L167-196 (비교: llm.py:L131-137), 호출처 backends/app/agents/legal/answer.py:L119-125` | fixed, `7da38a0` |
+| Nice | speed | 기업 검색마다 20MB 기업 목록 JSON을 이벤트 루프에서 다시 파싱 | `backends/app/core/dart/corp.py:L15-74` | fixed, `ba81252` (기업 목록 파싱을 스레드로 넘기는 부분은 dismissed: `json.loads`가 GIL을 잡아 루프 지연이 줄지 않았다. 메모리 캐시로 반복 파싱만 없앴다) |
+| Nice | scale | API의 rcept_no가 목록과 다르면 재무 캐시가 매번 무시됨 | `backends/app/core/dart/financials.py:L60-80` | fixed, `9f1e6b5` + `b5cb8ea` |
+| Nice | speed | 원문 재무제표를 한 분기씩 차례로 받고 큰 XML을 루프 스레드에서 파싱 | `backends/app/core/dart/history.py:L112-132` | fixed, `650f5e6` + `aaa3c65` |
+| Nice | bug | 적재에 실패했거나 아직 적재하지 않은 업로드 파일은 목록에도 안 나오고 지울 수도 없다 | `backends/app/api/documents.py:L109-L127` | fixed, `f5b7c21` |
+| Nice | bug | 관리 토큰 헤더에 ASCII가 아닌 글자가 있으면 401이 아니라 500이 난다 | `backends/app/api/admin.py:L20-L25` | fixed, `db8aacb` |
+| Nice | scale | 업로드 파일 전체를 메모리로 읽은 뒤에야 20MB 제한을 검사한다 | `backends/app/api/documents.py:L55-L58` | fixed, `d06d921` |
+| Nice | lean | 같은 일을 하는 헬퍼가 여러 곳에 있다: 공백 제거 키와 별표 번호 표기 | `backends/app/core/law/parser.py:L44-L45` | fixed, `e8b79cc` + `059a07f` |
+| Nice | lean | LawTools.get_article과 search_law(levels)는 운영 코드에서 쓰지 않는다 | `backends/app/agents/legal/tools.py:L111-L129` | fixed, `255d040` |
+| Nice | test | OC 인증키를 가리는 scrub과 법령 API 재시도 분기에 테스트가 없다 | `backends/app/core/law/client.py:L21-L60` | fixed, `914f798` |
+| Nice | speed | 재검색 루프마다 이미 점수를 낸 확장 후보를 같은 질문으로 다시 리랭크한다 | `backends/app/agents/legal/graph.py:L101-L130` | fixed, `01fa53d` |
+| Nice | lean | 쓰이지 않는 인자·설정 조회·결과 필드 | `backends/app/agents/orchestrator/subagents.py:L92, L120-123` | fixed, `f778951` + `059a07f` |
+| Nice | lean | 같은 일을 하는 코드가 두 곳에 있다 | `backends/app/api/chat.py:33-34 vs backends/app/api/report.py:129-130` | fixed, `24b4431` + `059a07f` |
+| Nice | test | 채팅 SSE 생성기에 테스트가 없다 | `backends/app/api/chat.py:L45-85` | fixed, `67d84ae` |
+| Nice | test | 뉴스 재검색·백업 요약 분기에 테스트가 없다 | `backends/app/agents/news/pipeline.py:L250-297` | fixed, `0945276` |
+| Nice | risk | 기사 본문 속 지시문을 막는 경계가 없다 | `backends/app/agents/news/pipeline.py:L96-106, L114-118, L139-141, L157` | fixed, `643cf15` |
+| Nice | bug | 기업 검색 응답이 늦게 오면 이전 검색 결과가 새 결과를 덮어쓴다 | `frontends/corp-advisor--app/src/hooks/useCorpData.ts:L39-L72` | fixed, `4ed61bb` |
+| Nice | lean | 업로드 모달의 단계 state가 Chatbot에 올라가 있고, 파일 이름도 오타(TirggerModal)다 | `frontends/corp-advisor--app/src/pages/Chatbot.tsx:L33-L45, L232-L246` | fixed, `f2e769a` |
+| Nice | lean | 기업명 검색 정렬을 백엔드와 프론트가 똑같이 두 번 한다 | `frontends/corp-advisor--app/src/hooks/useCorpData.ts:L12-27, L61` | fixed, `27cda5d` |
+| Nice | lean | scipy는 이항검정 하나에만 쓰고, eval이 쓰는 yaml·scipy가 requirements에 없다 | `backends/eval/stats.py:L31-41` | fixed, `59d9fab` |
+| Nice | lean | 쓰지 않는 상수와 한 줄짜리 중복 몇 개 | `backends/app/core/market.py:L9` | fixed, `3701c08` + `7d6e7e0` |
+| Nice | speed | embed()가 호출마다 새 HTTP 연결을 만들고, 세마포어가 있는데도 배치를 하나씩 보낸다 | `backends/app/core/embeddings.py:L13-L14, L25, L28-L39` | fixed, `a957a40` |
 
 본문 20개에 묶인 원 발견사항은 47개, 부록은 41개다.
