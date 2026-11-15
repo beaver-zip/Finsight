@@ -139,3 +139,28 @@ async def test_history_fills_from_original_and_derives_quarter(monkeypatch):
     assert rows["1Q23"].operating_income == 200 * B
     assert rows["2Q23"].operating_income == 250 * B and rows["2Q23"].net_income == 120 * B   # 반기 누적 - 1분기 누적
     assert rows["3Q23"].operating_income == 150 * B   # API 3분기 스냅숏에 누적만 있으면 반기 누적(원문)을 뺀다
+
+
+async def test_statements_unzips_and_parses_off_the_event_loop(monkeypatch):
+    import asyncio, io, time, zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("20231005000482.xml", _doc(BS + IS_CUM).encode())
+
+    class Dart:
+        async def binary(self, path, **kw):
+            return buf.getvalue()
+    real = original.parse_statements
+
+    def slow(*a):
+        time.sleep(0.3)                    # 수 MB 원문 파싱 흉내
+        return real(*a)
+    monkeypatch.setattr(original, "parse_statements", slow)
+    task = asyncio.create_task(original.statements(Dart(), "20231005000482", "11012"))
+    t0 = time.perf_counter()
+    await asyncio.sleep(0.05)
+    assert time.perf_counter() - t0 < 0.2          # 파싱 중에도 루프가 돈다
+    rows, fs = await task
+    assert fs == "CFS" and any(r["account_nm"] == "자본총계" for r in rows)
+    assert await original.statements(Dart(), "20231005000482", "11012") == (rows, fs)   # 캐시
