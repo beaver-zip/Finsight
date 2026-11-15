@@ -55,6 +55,15 @@ def test_split_articles_by_heading_and_by_page():
     assert [a.key for a in loose] == ["메모:1", "메모:3"] and loose[0].title == "1쪽"
 
 
+@pytest.mark.parametrize("ref", ["제1조에 따른 목적에 맞게 해석한다.", "제5조에 따른다.", "제1조(목적)에 따른 목적에 맞게 해석한다."])
+def test_split_articles_keeps_line_start_reference_in_current_article(ref):
+    pages = [f"제1조(목적) 이 규정은 내부통제를 정한다.\n제2조(정의) 용어의 뜻은\n{ref}\n제3조(책임) 의장은 점검한다."]
+    arts = {a.key: a for a in uploads.split_articles("내규", pages)}
+    assert list(arts) == ["내규:1", "내규:2", "내규:3"]
+    assert [p.text for p in arts["내규:1"].paragraphs] == ["이 규정은 내부통제를 정한다."]
+    assert ref in arts["내규:2"].paragraphs[0].text
+
+
 class FakeVectors:
     def __init__(self):
         self.chunks, self.deleted = [], []

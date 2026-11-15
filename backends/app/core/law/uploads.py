@@ -23,6 +23,8 @@ FILES = UPLOAD_DIR / "files"
 STORE = UPLOAD_DIR / "articles.json"
 MAX_BYTES = 20 * 1024 * 1024
 _HEAD = re.compile(r"(?m)^\s*제\s*(\d+)\s*조(?:\s*의\s*(\d+))?\s*(?:\(([^)\n]{1,60})\))?")
+# 줄 첫머리에 온 본문 참조("제1조에 따른", "제2조(정의) 및 …")는 조 머리가 아니다. 조사는 붙여 쓰므로 띄운 본문("의장은")은 남긴다.
+_REF = re.compile(r"(?:에|의|를|와|과|부터|까지|중|\s*제\s*\d+\s*항|\s+(?:및|또는|이나)\s)")
 _lock = threading.Lock()
 
 
@@ -81,10 +83,10 @@ def _article_keys(file_name: str, article: dict) -> dict:
 
 
 def split_articles(doc_name: str, pages: list[str], *, file_name: str | None = None) -> list[Article]:
-    """조 머리("제N조(제목)")로 나누고, 없으면 쪽 단위로 나눈다. 같은 조 번호가 다시 나오면 앞 조문에 붙인다."""
+    """조 머리("제N조(제목)")로 나누고, 없으면 쪽 단위로 나눈다. 같은 조 번호가 다시 나오면 같은 번호 조문에 붙인다."""
     law = document_key(file_name) if file_name is not None else key_name(doc_name)
     text = "\n".join(pages)
-    heads = list(_HEAD.finditer(text))
+    heads = [m for m in _HEAD.finditer(text) if not _REF.match(text, m.end())]
     out: dict[str, Article] = {}
     if len(heads) >= 2:
         for i, m in enumerate(heads):
@@ -96,7 +98,7 @@ def split_articles(doc_name: str, pages: list[str], *, file_name: str | None = N
             paras = [p for p in paras if p.text]
             if not paras:
                 continue
-            if akey in out:            # 본문에서 다른 조를 인용한 줄이 머리로 잡힌 경우: 앞 조문에 붙인다
+            if akey in out:            # 같은 조 번호가 다시 나온 경우(부칙 등): 같은 번호 조문에 붙인다
                 out[akey].paragraphs += paras
                 continue
             out[akey] = Article(key=akey, law_id="upload", law_name=doc_name, level="내규", no=no, branch=branch,
