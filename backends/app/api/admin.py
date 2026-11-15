@@ -21,7 +21,7 @@ def check_token(token: str | None) -> None:
     want = get_settings().admin_token
     if want is None or not want.get_secret_value():
         raise HTTPException(403, "ADMIN_TOKEN이 설정되지 않아 관리 API를 쓸 수 없습니다")
-    if not token or not hmac.compare_digest(token, want.get_secret_value()):
+    if not token or not hmac.compare_digest(token.encode(), want.get_secret_value().encode()):
         raise HTTPException(401, "관리 토큰이 맞지 않습니다")
 
 

@@ -127,6 +127,7 @@ def test_admin_token(monkeypatch):
     assert c.post("/admin/legal/reset").status_code == 403
     monkeypatch.setattr(s, "admin_token", SecretStr("t0ken"))
     assert c.post("/admin/legal/reset", headers={"X-Admin-Token": "nope"}).status_code == 401
+    assert c.post("/admin/legal/reset", headers=[(b"X-Admin-Token", "é".encode())]).status_code == 401
 
     async def fake_reset():
         return {"ok": True}
