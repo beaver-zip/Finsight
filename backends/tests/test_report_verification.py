@@ -81,7 +81,7 @@ async def test_real_graph_finalizes_and_warns(scenario, mode):
         assert not out["errors"]
 
 
-@pytest.mark.parametrize("route", ["html", "json", "stream"])
+@pytest.mark.parametrize("route", ["html", "json"])
 @pytest.mark.parametrize("mode", ["exception", "failed", "passed", "token"])
 def test_api_only_caches_verified_reports(scenario, route, mode):
     s = scenario
@@ -99,8 +99,6 @@ def test_api_only_caches_verified_reports(scenario, route, mode):
             assert bool(body["errors"]) == (mode != "passed")
         elif mode != "passed":
             assert "검증" in first.text
-            if route == "stream":
-                assert "event: error" in first.text and '"partial": true' in first.text
             assert "제거할 문장" not in first.text
         else:
             assert "남길 문장" in first.text
@@ -134,15 +132,13 @@ async def test_legacy_cached_report_is_not_served(scenario, monkeypatch, temp_ca
     assert s.verify.await_count == 1
 
 
-def test_html_json_stream_share_verified_cache(scenario):
+def test_html_json_share_verified_cache(scenario):
     app = FastAPI()
     app.include_router(report.router, prefix="/report")
     app.dependency_overrides[get_state] = lambda: scenario.st
     with TestClient(app) as client:
         assert client.get("/report/test/json").json()["verification"]["passed"] is True
         assert "남길 문장" in client.get("/report/test").text
-        stream = client.get("/report/test/stream").text
-        assert '"cached": true' in stream and "남길 문장" in stream
     assert scenario.verify.await_count == 1
 
 

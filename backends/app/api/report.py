@@ -1,16 +1,15 @@
-"""/report/{corp_code}: HTML, /stream(SSE), /json(CompanyReport).
+"""/report/{corp_code}: HTML, /json(CompanyReport).
 
 완성 리포트는 (corp_code, 최신 정기보고서 rcept_no, 그 뒤 최신 잠정실적 rcept_no)로 7일 캐시한다.
 잠정실적이 새로 나오면 키가 바뀌어 다시 만든다.
 """
 from __future__ import annotations
 
-import json
 import logging
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import PlainTextResponse, StreamingResponse
+from fastapi.responses import PlainTextResponse
 
 from app.core import budget
 from app.core.cache import get_cache
@@ -124,46 +123,3 @@ def error_code(e: Exception) -> str:
     if isinstance(e, budget.TokenBudgetExceeded):
         return "TOKEN_BUDGET"
     return "INTERNAL"
-
-
-def _sse(event: str, data: dict) -> str:
-    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
-
-
-@router.get("/{corp_code}/stream", summary="단계 진행 + 최종 HTML(SSE)")
-async def report_stream(corp_code: str, st: AppState = Depends(get_state)):
-    async def gen():
-        try:
-            profile, key = await _cache_key(st, corp_code)
-            hit = await get_cache().get("report", key)
-            if hit is not None:
-                yield _sse("final", {"html": hit["html"], "cached": True})
-                return
-            usage = budget.start_request()
-            final: dict = {}
-            cfg = _config(st)
-            async for mode, chunk in st.company_graph.astream({"corp": profile, "errors": []}, config=cfg,
-                                                               stream_mode=["updates", "custom"]):
-                if mode == "custom" and chunk.get("type") == "progress":
-                    yield _sse("progress", {"stage": chunk["stage"], "detail": chunk["detail"]})
-                elif mode == "updates":
-                    for node, upd in chunk.items():
-                        yield _sse("node", {"ns": ["company"], "node": node, "status": "end"})
-                        if isinstance(upd, dict):
-                            final.update({k: v for k, v in upd.items() if k != "errors"})
-                            final.setdefault("errors", []).extend(upd.get("errors", []) or [])
-            final["corp"] = profile
-            rep = _to_report(final, round(usage.cost_usd, 5))
-            if _cacheable(final, usage):
-                await get_cache().set("report", key, {"html": final.get("html", ""),
-                                                      "json": rep.model_dump(mode="json")}, ttl_s=WEEK)
-            for e in final.get("errors", []):
-                yield _sse("error", {"code": "PARTIAL", "message": e, "partial": True})
-            if (tb := budget.token_budget_event(usage)):
-                yield _sse("error", tb)
-            yield _sse("final", {"html": final.get("html", ""), "cost_usd": rep.cost_usd})
-        except Exception as e:  # noqa: BLE001
-            log.exception("report stream 실패")
-            yield _sse("error", {"code": error_code(e), "message": str(e), "partial": False})
-
-    return StreamingResponse(gen(), media_type="text/event-stream")
