@@ -1,4 +1,6 @@
 """법령 API 클라이언트: OC 키 가리기와 재시도 분기."""
+from pathlib import Path
+
 import httpx
 import pytest
 from pydantic import SecretStr
@@ -45,3 +47,16 @@ async def test_failed_search_body_is_not_cached(monkeypatch):
     with pytest.raises(client.LawApiError):
         await c.search("law", "전자금융거래법")
     assert "<resultCode>00</resultCode>" in await c.search("law", "전자금융거래법")
+
+
+@pytest.mark.parametrize("target, fixture", [("law", "law_act.xml"), ("admrul", "admrul_reg.xml"),
+                                             ("lsDelegated", "delegated_act.xml")])
+@pytest.mark.asyncio
+async def test_failed_service_body_is_not_cached(monkeypatch, target, fixture):
+    good = (Path(__file__).parent / "fixtures" / "lawgo" / fixture).read_text()
+    bodies = ["<Law>사용자 정보 검증에 실패하였습니다.</Law>", good]
+    c = _law_client(monkeypatch, lambda request: httpx.Response(200, text=bodies.pop(0)))
+    with pytest.raises(client.LawApiError):
+        await c.service(target, MST="1")
+    assert await c.service(target, MST="1") == good
+    assert await c.service(target, MST="1") == good and bodies == []
