@@ -11,6 +11,7 @@ import httpx
 
 from app.core.dart.client import DartClient
 from app.core.dart.shares import share_counts
+from app.core.market import ticker_for
 from app.settings import BACKEND_DIR
 
 PATH = BACKEND_DIR / "data" / "universe.json"
@@ -59,7 +60,7 @@ async def main(year: int, rc: str) -> None:
                 print("주식수", done, flush=True)
 
         await asyncio.gather(*(one(r) for r in rows))
-    tick = {r["stock_code"]: r["stock_code"] + (".KQ" if r["corp_cls"] == "K" else ".KS") for r in rows}
+    tick = {r["stock_code"]: ticker_for(r["stock_code"], r["corp_cls"]) for r in rows}
     px = await asyncio.to_thread(prices, list(tick.values()))
     for r in rows:
         p = px.get(tick[r["stock_code"]])

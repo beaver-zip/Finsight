@@ -20,7 +20,7 @@ from app.core.cache import get_cache
 from app.core.dart.client import DartClient
 from app.core.search import tavily
 from app.deps import AppState
-from app.settings import BACKEND_DIR, get_settings
+from app.settings import get_settings
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -37,8 +37,7 @@ async def lifespan(app: FastAPI):
     law_tools = await _open_law_tools()
     warm = asyncio.create_task(reranker.warmup()) if law_tools else None   # 시작을 막지 않는다
     runner = make_runner(build_legal_graph(), law_tools) if law_tools else None
-    db = get_settings().sqlite_path
-    db = db if db.is_absolute() else BACKEND_DIR / db
+    db = get_settings().resolve(get_settings().sqlite_path)
     db.parent.mkdir(parents=True, exist_ok=True)
     conn = await aiosqlite.connect(str(db))                  # 채팅 단기 메모리(thread_id별 대화)
     saver = AsyncSqliteSaver(conn, serde=serializer())
