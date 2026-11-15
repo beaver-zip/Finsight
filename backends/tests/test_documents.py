@@ -520,3 +520,23 @@ async def test_concurrent_registers_of_replacement_keep_one_generation(store):
     active = uploads.all_docs()["동시.pdf"]["vector_name"]
     assert [(c.law_name, c.text) for c in vec.chunks] == [(active, "New.")]
     assert sorted(p.name for p in (store / "files").iterdir()) == ["동시.pdf"]
+
+
+@pytest.mark.asyncio
+async def test_upload_during_register_stays_pending(store):
+    from tempfile import SpooledTemporaryFile
+
+    from fastapi import UploadFile
+
+    v2, v3 = _pdf("V2."), _pdf("V3.")
+    vec, st, reg = await _register_replacement_paused("교체.pdf", _pdf("V1."), v2)
+    body = SpooledTemporaryFile()  # 메모리 파일이라 read가 스레드로 넘어가지 않고 바로 끝난다
+    body.write(v3)
+    body.seek(0)
+    upload = asyncio.create_task(documents.upload_pdf([UploadFile(body, filename="교체.pdf")]))
+    await asyncio.sleep(0)
+    vec.gate.set()
+    assert (await reg)["registered"] and (await upload)["uploaded"] == ["교체.pdf"]
+    path = store / "files" / "교체.pdf"
+    assert [c.text for c in vec.chunks] == ["V2."] and path.read_bytes() == v2
+    assert uploads.pending_path(path).read_bytes() == v3

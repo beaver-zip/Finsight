@@ -59,7 +59,8 @@ async def upload_pdf(files: list[UploadFile] = File(...)):
     for f in files:
         try:
             data = await f.read(uploads.MAX_BYTES + 1)   # 한도를 넘는지만 알면 되므로 그 이상은 읽지 않는다
-            path = uploads.save_file(f.filename or "", data)
+            async with _locks[uploads.safe_name(f.filename or "")]:  # 진행 중인 적재가 새 .pending을 옮기지 않게 한다
+                path = uploads.save_file(f.filename or "", data)
             uploaded.append(path.name)
         except uploads.UploadError as e:
             rejected.append({"file": f.filename, "reason": str(e)})
