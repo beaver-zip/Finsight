@@ -114,7 +114,7 @@ async def metrics_for(dart: DartClient, corp_code: str, stock_code: str, corp_cl
     pref_px = await pref_price(stock_code, corp_cls) if sh and sh.pref_out else None
     total = sh.total_out if sh else None
     # shortcut: 최근 정기보고서 뒤 분할·병합한 피어는 주식 수가 시세와 기준이 달라 시가총액·PBR·PER이 틀린다.
-    # 피어마다 분할 이력을 불러야 고칠 수 있다. 피어 표가 잘못 보이는 사례가 생기면 그때 넣는다.
+    # 대상 회사 자기 행은 analysis._peers가 맞춘다. 다른 피어는 분할 이력을 불러야 하므로 사례가 생기면 넣는다.
     mcap = None
     if price and sh:
         mcap = price * sh.common_out + (pref_px * sh.pref_out if pref_px else 0)

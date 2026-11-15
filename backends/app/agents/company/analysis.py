@@ -5,10 +5,12 @@
 """
 from __future__ import annotations
 
+import dataclasses
 import logging
 import re
 import statistics as st
 from bisect import bisect_right
+from calendar import monthrange
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
@@ -491,7 +493,8 @@ def _annual(c: dict) -> None:
             ni = sum(f(r.net_income_owners) for r in r4)
         sh = _shares_at(inp, (y, 4))
         dv = inp.dividends.get(y)
-        k = _split_factor(inp, date(y, 12, 31))           # 공시 EPS·DPS는 당시 주식 기준, 연말 종가는 분할 반영
+        # 공시 EPS·DPS는 사업보고서 제출 때 주식 기준(그 전 분할은 소급 반영), 연말 종가는 지금까지 분할 반영
+        k = _split_factor(inp, _rcept_date(dv.rcept_no) if dv and dv.rcept_no else _q_end((y, 4)))
         eps = dv.eps / k if dv and dv.eps else (ni / sh if ni is not None and sh else None)
         e = eq.get((y, 4))
         e0 = eq.get((y - 1, 4))
@@ -590,7 +593,12 @@ def _split_factor(inp: Inputs, d: date) -> float:
 
 
 def _q_end(yq: tuple[int, int]) -> date:
-    return date(yq[0], yq[1] * 3, 28)
+    y, m = yq[0], yq[1] * 3
+    return date(y, m, monthrange(y, m)[1])
+
+
+def _rcept_date(rcept_no: str) -> date:
+    return date(int(rcept_no[:4]), int(rcept_no[4:6]), int(rcept_no[6:8]))
 
 
 def _shares_at(inp: Inputs, yq: tuple[int, int]) -> float | None:
@@ -724,7 +732,7 @@ def _valuation(c: dict) -> None:
         sh = _shares_at(inp, (r.year, r.q))
         if not sh or r.equity_owners is None or not r.rcept_no:
             continue
-        avail = date(int(r.rcept_no[:4]), int(r.rcept_no[4:6]), int(r.rcept_no[6:8]))
+        avail = _rcept_date(r.rcept_no)
         ni4 = _ttm(by, r.year, r.q, "net_income_owners")
         eps = ni4 / sh if ni4 is not None else None
         pts.append((avail, f(r.equity_owners) / sh, eps))
@@ -803,6 +811,11 @@ def _peers(c: dict) -> None:
     others = [r for r in rows if not r.is_self]
     if me is None or not others:
         return
+    k = _split_factor(inp, _q_end((inp.filing.bsns_year, _q_of(inp.filing.reprt_code))))
+    if k != 1:          # 자기 행은 공시 주식 수 × 분할 뒤 시세라, 핵심 수치와 같은 기준으로 맞춘다(피어는 core/peers.py 참고)
+        me = dataclasses.replace(me, mcap=me.mcap * k, pbr=me.pbr * k if me.pbr else None,
+                                 per=me.per * k if me.per else None, per_rr=me.per_rr * k if me.per_rr else None)
+        rows = [me if r.is_self else r for r in rows]
     top = max(others, key=lambda r: r.mcap or 0)
     nm = clean_name(top.name)
     F.add("roe", "self", f"{c['name']} ROE(최근 4개 분기)", fmt.pct(me.roe), me.roe, "%")

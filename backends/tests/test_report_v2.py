@@ -219,19 +219,44 @@ def test_prelim_without_revenue_keeps_latest_table():
     assert "rev_vs_cons.3Q26P" not in data.facts
 
 
-@pytest.mark.parametrize("ratio", [5.0, 0.1])            # 5:1 분할, 10:1 병합
-def test_split_after_last_filing_keeps_per_share_values(ratio):
-    base = analyze(_inputs())
+def _split_world(sd: date, ratio: float) -> Inputs:
+    """분할·병합이 있었던 같은 회사: 시세는 수정 주가, 분할 뒤 분기말 주식 수와 분할 뒤 제출한 사업보고서 EPS·DPS는 새 기준."""
+    import dataclasses
+    from calendar import monthrange
+
     inp = _inputs()
-    inp.splits = [(date(2026, 9, 1), ratio)]               # 반기보고서(2026.06) 뒤 분할
-    inp.px = [(d, v / ratio) for d, v in inp.px]           # 시세는 분할 반영(수정 주가)
-    data = analyze(inp)
-    for k in ("mcap.now", "per.ttm", "pbr.now", "shares_cut_common.since"):
+    inp.splits = [(sd, ratio)]
+    inp.px = [(d, v / ratio) for d, v in inp.px]
+    for (y, q), sh in list(inp.shares.items()):
+        if date(y, q * 3, monthrange(y, q * 3)[1]) >= sd:
+            inp.shares[(y, q)] = dataclasses.replace(sh, **{k: int(getattr(sh, k) * ratio) for k in
+                                                            ("common_issued", "pref_issued", "common_out", "pref_out")})
+    for y, dv in list(inp.dividends.items()):
+        filed = date(y + 1, 3, 15)
+        k = ratio if filed >= sd else 1
+        inp.dividends[y] = Dividend(y, round(dv.eps / k), round(dv.dps_common / k), dv.payout, f"{filed:%Y%m%d}000001")
+    if sd > date(2026, 6, 30):                               # 자기 피어 행: 분할 전 주식 수 × 분할 뒤 시세
+        inp.peers = [dataclasses.replace(r, mcap=r.mcap / ratio, price=r.price / ratio, pbr=r.pbr / ratio,
+                                         per=r.per / ratio) if r.is_self else r for r in inp.peers]
+    return inp
+
+
+@pytest.mark.parametrize("sd, ratio", [
+    (date(2026, 9, 1), 5.0),       # 마지막 정기보고서(2026.06) 뒤 분할
+    (date(2026, 9, 1), 0.1),       # 같은 때 10:1 병합
+    (date(2026, 6, 30), 5.0),      # 분기 마지막 날(주식 수에 이미 반영)
+    (date(2025, 7, 1), 0.1),       # 발행주식 비교 기준(2024년 말)과 현재 사이 병합 → 소각으로 보지 않는다
+    (date(2026, 2, 10), 5.0),      # 사업연도 말 뒤, 사업보고서 제출 전(EPS가 이미 소급 수정됨)
+])
+def test_split_keeps_per_share_values(sd, ratio):
+    base, data = analyze(_inputs()), analyze(_split_world(sd, ratio))
+    for k in ("mcap.now", "per.ttm", "pbr.now", "shares_cut_common.since", "pbr_ratio.peer1"):
         assert data.facts[k].text == base.facts[k].text, k
-    rows = lambda d: {r["head"]: r["cells"] for r in d.tables["annual"]["rows"]}
-    assert rows(data)["PER"] == rows(base)["PER"]
-    assert rows(data)["EPS"][:3] == [fmt.num(float(x.replace(",", "")) / ratio, 0) for x in rows(base)["EPS"][:3]]
-    assert rows(data)["주당배당금"][:3] == [fmt.num(1000 / ratio, 0)] * 3
+    rows = lambda d, t: {r["head"]: r["cells"] for r in d.tables[t]["rows"]}
+    assert rows(data, "annual")["PER"] == rows(base, "annual")["PER"]
+    assert rows(data, "annual")["EPS"][:3] == [fmt.num(2000 / ratio, 0)] * 3
+    assert rows(data, "annual")["주당배당금"][:3] == [fmt.num(1000 / ratio, 0)] * 3
+    assert rows(data, "peers") == rows(base, "peers")
 
 
 def test_render_without_draft_has_no_raw_slots():
