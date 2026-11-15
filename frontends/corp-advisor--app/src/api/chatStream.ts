@@ -16,7 +16,8 @@ export async function readChatStream(stream: ReadableStream<Uint8Array>, h: Hand
         const raw = buf.slice(0, idx);
         buf = buf.slice(idx + 2);
         const ev = /^event: (.*)$/m.exec(raw)?.[1];
-        const dataLine = /^data: (.*)$/m.exec(raw)?.[1];
+        // `.`은 U+2028/U+2029에서 끊기고, 백엔드는 이 글자를 이스케이프하지 않고 보낸다
+        const dataLine = /^data: ([^\n]*)/m.exec(raw)?.[1];
         if (!ev || !dataLine) continue;
         const data = JSON.parse(dataLine);
         if (ev === "progress") h.onProgress?.(data.detail);

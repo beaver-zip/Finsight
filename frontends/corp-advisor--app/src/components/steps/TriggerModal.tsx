@@ -1,7 +1,7 @@
-// components/steps/Step2_Trigger.tsx
+// components/steps/TriggerModal.tsx
 import { useState } from "react";
 import { Button } from "../Button";
-const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+import { BASE_URL } from "../../api/baseUrl";
 
 type Props = {
   files: string[]; // 표시할 파일 이름

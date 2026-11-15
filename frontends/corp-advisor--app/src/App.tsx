@@ -1,6 +1,5 @@
 import "./App.css";
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
-import { ChatProvider } from "./ChatContext.tsx";
 
 import Home from "./pages/Home.tsx";
 import Report from "./pages/Report.tsx";
@@ -11,22 +10,8 @@ function App() {
     <Router>
       <Routes>
         <Route path="/" element={<Home />} />
-        <Route
-          path="/report"
-          element={
-            <ChatProvider>
-              <Report />
-            </ChatProvider>
-          }
-        />
-        <Route
-          path="/chatbot"
-          element={
-            <ChatProvider>
-              <Chatbot />
-            </ChatProvider>
-          }
-        />
+        <Route path="/report" element={<Report />} />
+        <Route path="/chatbot" element={<Chatbot />} />
       </Routes>
     </Router>
   );
