@@ -228,3 +228,22 @@ async def test_cumulative_reuses_supplied_snapshots_without_external_calls(monke
     reports.assert_not_awaited()
     assert dart.json.await_count == 1
     assert await history.cumulative_items(dart, "corp", []) == {}
+
+
+@pytest.mark.asyncio
+async def test_self_peer_row_shares_history_snapshot_keys(monkeypatch):
+    from app.core import peers
+    from app.domain.models import CorpProfile
+
+    # 3분기 보고서가 정정돼 history는 기대 번호로 스냅샷을 받는다. 피어 자기 행도 같은 키를 써야 한다
+    reports = {(2026, "11014"): "r3", (2025, "11011"): "ra", (2025, "11014"): "rp"}
+    monkeypatch.setattr(history.original, "periodic_reports", AsyncMock(return_value=reports))
+    monkeypatch.setattr(peers, "share_counts", AsyncMock(return_value=None))
+    monkeypatch.setattr(peers, "daily_close", AsyncMock(return_value=[]))
+    monkeypatch.setattr(peers, "peer_candidates", lambda corp, n: [])
+    dart = NS(json=AsyncMock(side_effect=lambda endpoint, **p: {"list": rows(reports[(int(p["bsns_year"]), p["reprt_code"])])}))
+    for y, rc in reports:
+        await financials.get_snapshot(dart, "corp", y, rc, expected_rcept_no=reports[(y, rc)])
+    corp = CorpProfile(corp_code="corp", corp_name="테스트", stock_code="123450", corp_cls="Y", acc_mt=12)
+    got = await peers.peer_rows(dart, corp, 2026, 3)
+    assert got and got[0].is_self and dart.json.await_count == 3        # 추가 fnlttSinglAcntAll 없음
