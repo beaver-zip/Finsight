@@ -8,8 +8,9 @@ import httpx
 import pytest
 
 from app.agents.company import writer
-from app.agents.company.analysis import Consensus, Inputs, analyze, clean_title, ret_between
-from app.agents.company.render import Text, render_report, table_html, ticks
+from app.agents.company.analysis import Consensus, Inputs, analyze, clean_title, make_inputs, ret_between
+from app.agents.company.collect import Collected
+from app.agents.company.render import Text, news_html, render_report, table_html, ticks
 from app.core.dart.history import QRow, qkey
 from app.core.dart.prelim import Prelim, PrelimFiling, PrelimRow
 from app.core.dart.shares import BuybackDecision, Dividend, Shares
@@ -134,6 +135,36 @@ def test_financial_company_has_shareholder_section_only():
     assert "<h2>주주환원: 배당이 늘었다</h2>" in html and "현금흐름과 주주환원" not in html
 
 
+def test_ni_hero_does_not_mix_consolidated_net_income():
+    inp = _inputs()
+    inp.industry = "financial"                            # 영업이익률 대신 지배주주 순이익 대표 차트
+    gap = inp.quarters[-2]
+    gap.net_income_owners, gap.net_income = None, D(1e15)  # 지배 계정을 못 찾은 연결(CFS) 분기
+    hero = analyze(inp).charts["hero"]
+    assert hero["kind"] == "ni" and gap.key not in hero["keys"] and max(hero["vals"]) < 1e15
+
+
+def test_key_cards_survive_index_failure_and_share_mcap_text():
+    inp = _inputs()
+    inp.index_px = []                                     # 지수 조회 실패
+    for sh in inp.shares.values():
+        sh.common_out *= 2                                # 시가총액 10조~100조 구간
+    data = analyze(inp)
+    cards = {k["label"]: k for k in data.key_data}
+    assert cards["52주 최고"]["value"] == data.facts["hi52.now"].text
+    assert cards["12개월 수익률"]["sub"] == "" and cards["12개월 수익률"]["sub_sign"] is None
+    assert cards["시가총액"]["value"] == data.facts["mcap.now"].text
+
+
+def test_make_inputs_copies_collected_and_defaults_segment_source():
+    base = _inputs()
+    col = Collected(quarters=base.quarters, px=base.px, index_name="KOSDAQ", errors=["x"])
+    inp = make_inputs(base.corp, base.today, base.filing, col, news=None)
+    assert inp.quarters is col.quarters and inp.index_name == "KOSDAQ" and inp.news == [] and inp.consensus is None
+    assert inp.segment_source == Inputs.segment_source and "내부거래 포함" in inp.segment_source
+    assert make_inputs(base.corp, base.today, base.filing, Collected(segment_source="주석")).segment_source == "주석"
+
+
 def test_cfo_to_net_income_blank_when_cfo_negative():
     inp = _inputs()
     inp.cum[(2026, 2)]["cfo"] = D(-1e11)
@@ -157,6 +188,9 @@ def test_events_excess_return_and_rel():
     e = ev[0]
     assert e["ex0"] == pytest.approx(e["day_stock"] - e["day_index"], abs=1e-9)
     assert data.charts["rel"]["rows"][0][1] == pytest.approx(100.0)
+    # 마지막 발표의 3거래일 값이 있어도 '최근 제외' 횟수·평균에는 넣지 않는다
+    assert ev[-1]["ex3"] is not None and data.facts["ev_n.all"].text == "9번"
+    assert data.facts["ev_abs_mean.all"].value == pytest.approx(D(str(round(sum(abs(e["ex0"]) for e in ev[:-1]) / 9, 6))))
 
 
 def test_prelim_path_uses_disclosed_growth_and_consensus():
@@ -376,6 +410,15 @@ def test_text_citations_and_unknown_slot():
                                                "title": "기사"}])
     out = tx("영업이익 {{op.x}}[n4][n9] 그리고 {{zz.x}}")
     assert ">2</sup>" in out and "n9" not in out and "–" in out
+
+
+def test_render_escapes_llm_text_and_blocks_unsafe_links():
+    assert "<img" not in Text({}, [])("<img src=x onerror=alert(1)>")
+    out = news_html([{"no": 1, "id": "n1", "title": "<script>x</script>", "url": "javascript:alert(1)"}],
+                    [{"title": "<b>", "url": "javascript:x"}, {"title": "공시", "url": "https://dart.fss.or.kr/x"}])
+    assert "<script" not in out and "javascript:" not in out and "<b>" not in out
+    # 프론트가 링크 속성을 붙이지 않으므로 외부 링크는 HTML에서 새 탭·noopener로 연다
+    assert out.count('target="_blank" rel="noopener noreferrer"') == 3
 
 
 def test_ticks_and_table_cells():
