@@ -119,7 +119,7 @@ async def register(req: FileNames, st: AppState = Depends(get_state)):
 @rag_router.get("/show_files_in_collection", summary="올린 문서 목록")
 async def show_files():
     # 적재 전이거나 적재에 실패한 파일도 보여 줘야 화면에서 지울 수 있다.
-    docs = {p.name: {} for p in uploads.FILES.glob("*.pdf", case_sensitive=False)} | uploads.all_docs()
+    docs = {p.name: {} for p in uploads.FILES.glob("*") if p.suffix.lower() == ".pdf"} | uploads.all_docs()
     return {"unique_file_name_and_chunk": [{"file_name": k, "chunk_count": v.get("chunk_count", 0),
                                             "articles": len(v.get("articles", []))}
                                            for k, v in sorted(docs.items())]}

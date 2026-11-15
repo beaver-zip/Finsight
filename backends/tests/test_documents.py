@@ -558,3 +558,20 @@ def test_split_articles_splits_untitled_heading_before_particle_like_body():
     arts = {a.key: a for a in uploads.split_articles("내규", pages)}
     assert list(arts) == ["내규:1", "내규:2", "내규:3", "내규:4"]
     assert arts["내규:2"].paragraphs[0].text == "의장은 매년 점검한다." and arts["내규:4"].title == "정의"
+
+
+@pytest.mark.asyncio
+async def test_document_list_avoids_python_312_glob_option(store, monkeypatch):
+    from pathlib import Path
+
+    glob = Path.glob
+
+    def glob_311(self, pattern):  # Python 3.11의 Path.glob은 case_sensitive를 받지 않는다
+        return glob(self, pattern)
+
+    monkeypatch.setattr(Path, "glob", glob_311)
+    uploads.save_file("Policy.PDF", _pdf("Scanned."))
+    uploads.save_file("내규.pdf", _pdf("Rule."))
+    uploads.pending_path(uploads.file_path("내규.pdf")).write_bytes(b"x")
+    files = (await documents.show_files())["unique_file_name_and_chunk"]
+    assert [f["file_name"] for f in files] == ["Policy.PDF", "내규.pdf"]
