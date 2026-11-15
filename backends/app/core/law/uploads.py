@@ -51,8 +51,13 @@ def save_file(name: str, data: bytes) -> Path:
         raise UploadError(f"{fname}: PDF 형식이 아닙니다")
     FILES.mkdir(parents=True, exist_ok=True)
     path = FILES / fname
-    path.write_bytes(data)
+    # 등록된 문서의 원본은 새 파일 적재가 성공할 때까지 남긴다(register가 옮긴다).
+    (pending_path(path) if fname in all_docs() else path).write_bytes(data)
     return path
+
+
+def pending_path(path: Path) -> Path:
+    return path.with_name(path.name + ".pending")
 
 
 def file_path(name: str) -> Path:
@@ -162,6 +167,6 @@ def remove(file_name: str) -> dict | None:
         STORE.write_text(json.dumps(data, ensure_ascii=False))
         _load.cache_clear()
     p = FILES / file_name
-    if p.is_file():
-        p.unlink()
+    p.unlink(missing_ok=True)
+    pending_path(p).unlink(missing_ok=True)
     return d

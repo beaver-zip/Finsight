@@ -79,9 +79,11 @@ async def register(req: FileNames, st: AppState = Depends(get_state)):
     done, failed = [], []
     for name in req.file_name:
         try:
-            path = uploads.file_path(name)
+            path = uploads.FILES / uploads.safe_name(name)
+            pending = uploads.pending_path(path)
+            source = pending if pending.is_file() else uploads.file_path(name)
             doc_name = Path(path.name).stem
-            pages = await asyncio.to_thread(uploads.pdf_pages, path)
+            pages = await asyncio.to_thread(uploads.pdf_pages, source)
             arts = uploads.split_articles(doc_name, pages, file_name=path.name)
             if not arts:
                 raise uploads.UploadError(f"{path.name}: 텍스트를 읽지 못했습니다(스캔 PDF는 지원하지 않습니다)")
@@ -95,6 +97,8 @@ async def register(req: FileNames, st: AppState = Depends(get_state)):
             except BaseException:
                 await _discard_vectors(vec, vector_name)
                 raise
+            if source is pending:
+                pending.replace(path)
             if previous:
                 await _discard_vectors(vec, previous.get("vector_name", previous["doc_name"]))
             done.append({"file_name": path.name, "articles": len(arts), "chunk_count": n})

@@ -96,8 +96,9 @@ def test_upload_register_list_delete_roundtrip(store):
     assert files == [{"file_name": "내규.pdf", "chunk_count": 2, "articles": 2}]
     assert c.post("/files/download-pdf/", json={"file_name": "내규.pdf"}).content[:4] == b"%PDF"
     assert c.post("/rag/delete_objects_from_file_name", json={"file_name": "없는.pdf"}).status_code == 404
+    uploads.save_file("내규.pdf", pdf)  # 적재 전 교체본(pending)도 함께 지워야 한다
     assert c.post("/rag/delete_objects_from_file_name", json={"file_name": "내규.pdf"}).json() == {"deleted": "내규.pdf"}
-    assert vec.chunks == [] and uploads.all_docs() == {} and not (store / "files" / "내규.pdf").exists()
+    assert vec.chunks == [] and uploads.all_docs() == {} and list((store / "files").iterdir()) == []
 
 
 def test_admin_token(monkeypatch):
@@ -126,12 +127,13 @@ async def test_failed_replacement_preserves_old_document_and_retry(store, monkey
 
     vec = FakeVectors()
     st = NS(law_tools=NS(vectors=vec))
-    uploads.save_file("내규.pdf", _pdf("Old policy."))
+    old_pdf, new_pdf = _pdf("Old policy."), _pdf("New policy.\fAnother new page.")
+    uploads.save_file("내규.pdf", old_pdf)
     uploads.save_file("다른.pdf", _pdf("Other policy."))
     await documents.register(documents.FileNames(file_name=["내규.pdf", "다른.pdf"]), st)
     before = deepcopy(uploads.all_docs())
     old_chunks = list(vec.chunks)
-    uploads.save_file("내규.pdf", _pdf("New policy.\fAnother new page."))
+    uploads.save_file("내규.pdf", new_pdf)
 
     async def fail_add(chunks):
         if failure == "partial":
@@ -151,9 +153,12 @@ async def test_failed_replacement_preserves_old_document_and_retry(store, monkey
     assert uploads.all_docs() == before
     assert vec.chunks == old_chunks
     assert uploads.get_article(uploads.document_key("내규.pdf") + ":1").paragraphs[0].text == "Old policy."
+    assert (store / "files" / "내규.pdf").read_bytes() == old_pdf
 
     result = await documents.register(documents.FileNames(file_name=["내규.pdf"]), st)
     assert not result["failed"] and result["registered"][0]["chunk_count"] == 2
+    assert sorted(p.name for p in (store / "files").iterdir()) == sorted(["내규.pdf", "다른.pdf"])
+    assert (store / "files" / "내규.pdf").read_bytes() == new_pdf
     assert sorted(c.text for c in vec.chunks) == ["Another new page.", "New policy.", "Other policy."]
     assert uploads.all_docs()["다른.pdf"] == before["다른.pdf"]
     assert uploads.get_article(uploads.document_key("내규.pdf") + ":1").paragraphs[0].text == "New policy."
