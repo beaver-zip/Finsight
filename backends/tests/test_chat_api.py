@@ -7,6 +7,7 @@ from types import SimpleNamespace as NS
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.graph import START, StateGraph
 
 from app.agents.orchestrator import graph as G
 from app.agents.orchestrator.router import Route, SubTask
@@ -50,7 +51,13 @@ def test_clarification_interrupts_then_resume_streams_final(monkeypatch):
         text="정보보호최고책임자의 자격은 시행령 별표 1에 정해져 있습니다.",
         citations=[CitedSpan(source="전자금융거래법시행령:11-4", paragraph_index=4, cited_text="…별표 1과 같다.")])])
 
+    sub = StateGraph(dict)              # make_runner처럼 따로 config를 넘겨 ainvoke하는 하위 그래프
+    sub.add_node("a", lambda s: {"q": s["q"]})
+    sub.add_edge(START, "a")
+    sub = sub.compile()
+
     async def runner(q):
+        await sub.ainvoke({"q": q}, config={"configurable": {}})
         return ans, {"전자금융거래법시행령:11-4": "④ …별표 1과 같다."}
     saver = InMemorySaver()
     st = NS(chat_graph=G.build_orchestrator(saver), dart=object(), http=object(), legal_runner=runner)
@@ -62,3 +69,5 @@ def test_clarification_interrupts_then_resume_streams_final(monkeypatch):
     final = [d for e, d in second if e == "final"]
     assert len(final) == 1 and second[-1][0] == "final"
     assert "시행령 별표 1" in final[0]["answer"]["markdown"]
+    # 턴 끝과 되묻기 때만 상위 체크포인트를 남기고, 하위 그래프 상태는 남기지 않는다(기본값이면 상위 11개, 하위 3개)
+    assert {ns: len(v) for ns, v in saver.storage["t1"].items() if v} == {"": 2}
