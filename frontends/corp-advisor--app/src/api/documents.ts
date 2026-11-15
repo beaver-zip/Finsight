@@ -20,7 +20,8 @@ export async function deleteDoc(baseUrl: string, fileName: string) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ file_name: fileName }),
   });
-  if (!response.ok) {
+  // 404는 이미 지워진 파일이다(두 번 누른 삭제 버튼 등)
+  if (!response.ok && response.status !== 404) {
     const data = await response.json().catch(() => ({})); // 500은 평문일 수 있다
     throw new Error(data.detail || `삭제 실패(HTTP ${response.status})`);
   }

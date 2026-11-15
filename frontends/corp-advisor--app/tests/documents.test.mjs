@@ -44,3 +44,10 @@ test("deleteDoc rejects with the backend detail or the HTTP status", async (t) =
   mock.method(globalThis, "fetch", async () => new Response("Internal Server Error", { status: 500 }));
   await assert.rejects(deleteDoc("/api", "a.pdf"), { message: "삭제 실패(HTTP 500)" });
 });
+
+test("deleteDoc treats an already deleted file (404) as success", async (t) => {
+  t.after(() => mock.restoreAll());
+  // 삭제 버튼을 두 번 누르면 두 번째 요청은 이미 지워진 파일이라 404를 받는다
+  mock.method(globalThis, "fetch", async () => Response.json({ detail: "올린 문서가 아닙니다: a.pdf" }, { status: 404 }));
+  await deleteDoc("/api", "a.pdf");
+});
