@@ -21,7 +21,7 @@ jobs:
           cache-dependency-path: backends/requirements.txt
       - name: 의존성 설치(torch는 CPU용)
         run: |
-          pip install --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt pytest pytest-asyncio
+          pip install --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt
       - name: 단위 테스트
         run: PYTHONPATH=. pytest -q
 
