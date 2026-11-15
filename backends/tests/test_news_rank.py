@@ -222,3 +222,44 @@ async def test_pipeline_researches_missing_aspects_and_fills_failed_summaries(mo
     assert res.texts == {n.id: f"{n.url.rsplit('/', 1)[1]} 본문 첫 문장입니다. " + "가" * 200 for n in res.items}
     assert not {f"https://x.kr/{u}" for u in fail} & {n.url for n in res.items} and len(summarized) == 7
     assert backup["peak"] == 2
+
+
+async def test_pipeline_raises_when_every_summary_hits_api_error(monkeypatch):
+    # API 장애(429·크레딧 소진)면 기사 0건을 조용히 돌려주지 말고(리포트 오류에 안 남는다) 오류를 올린다.
+    # 한 묶음이 모두 API 오류면 백업 기사로 호출을 더 태우지 않는다
+    import anthropic
+    import httpx
+
+    from app.agents.news import pipeline as P
+    from app.core.search.news import SearchHit
+    from app.domain.models import CorpProfile, QueryPlan
+
+    def hit(i):
+        return SearchHit(title=f"삼성전자 u{i}", url=f"https://x.kr/u{i}", snippet="s", raw_content="본문. " + "가" * 200,
+                         published_at=NOW - timedelta(days=1), published_raw=None, source="x", rank=i)
+
+    async def plans(corp, disc, groups, **k):
+        return [QueryPlan(aspect=P.ASPECT_GROUPS[g][0], query=f"q{g}", must_include=["삼성전자"]) for g in groups]
+
+    async def search(plans, time_range, http, q_offset=0):
+        return [(0, hit(i)) for i in range(12)]
+
+    async def emb(texts):
+        return np.eye(len(texts))
+
+    async def classify(name, cands, disc):
+        for c in cands:
+            c.relevance, c.aspect, c.materiality = 2, P.ASPECTS[int(c.id[1:]) % len(P.ASPECTS)], 2
+    calls = []
+
+    async def structured(model, messages, **k):
+        calls.append(1)
+        raise anthropic.APITimeoutError(request=httpx.Request("POST", "https://api.anthropic.com"))
+    monkeypatch.setattr(P, "plan_queries", plans)
+    monkeypatch.setattr(P, "_search_all", search)
+    monkeypatch.setattr(P, "embed", emb)
+    monkeypatch.setattr(P, "classify", classify)
+    monkeypatch.setattr(P.llm, "structured", structured)
+    with pytest.raises(anthropic.APIError):
+        await P.run_pipeline(CorpProfile(corp_code="1", corp_name="삼성전자"), [], http=None, now=NOW)
+    assert len(calls) == 5

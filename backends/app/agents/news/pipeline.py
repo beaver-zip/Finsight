@@ -171,7 +171,7 @@ async def summarize(corp_name: str, c: Candidate) -> ArticleAnalysis | None:
     try:
         return await llm.structured(ArticleAnalysis, [{"role": "user", "content": prompt}], system=SUMMARY_SYSTEM,
                                     effort="medium", task="news.summarize", validate=check)
-    except (llm.StructuredOutputError, anthropic.APIError) as e:     # 그 기사만 빼고 다음 순위로 채운다
+    except llm.StructuredOutputError as e:     # 그 기사만 빼고 다음 순위로 채운다(API 오류는 _run_pipeline이 센다)
         log.info("기사 분석 실패 %s: %s", c.url, e)
         return None
 
@@ -298,14 +298,29 @@ async def _run_pipeline(corp: CorpProfile, disclosures: list[Disclosure], *, htt
             cov = coverage(picked, ASPECTS, now=now)
 
     # 9. 요약과 영향(실패한 기사는 다음 순위로 채운다)
+    api_errors: list[anthropic.APIError] = []
+
+    async def one(c: Candidate) -> ArticleAnalysis | None:
+        try:
+            return await summarize(name, c)
+        except anthropic.APIError as e:          # 재시도 소진 뒤 타임아웃 등: 그 기사만 뺀다
+            log.info("기사 분석 API 오류 %s: %s", c.url, e)
+            api_errors.append(e)
+            return None
+
     chosen_ids = {c.id for c in picked}
     backups = [c for c in reps if c.id not in chosen_ids]
-    analyses = await asyncio.gather(*(summarize(name, c) for c in picked))
+    analyses = await asyncio.gather(*(one(c) for c in picked))
     final: list[tuple[Candidate, ArticleAnalysis]] = [(c, a) for c, a in zip(picked, analyses) if a is not None]
-    while (need := min(5, len(picked)) - len(final)) > 0 and backups:
+    outage = bool(picked) and len(api_errors) == len(picked)     # 한 묶음이 모두 API 오류면 백업을 태우지 않는다
+    while not outage and (need := min(5, len(picked)) - len(final)) > 0 and backups:
         batch, backups = backups[:need], backups[need:]
-        got = await asyncio.gather(*(summarize(name, c) for c in batch))
+        n_err = len(api_errors)
+        got = await asyncio.gather(*(one(c) for c in batch))
         final += [(c, a) for c, a in zip(batch, got) if a is not None]
+        outage = len(api_errors) - n_err == len(batch)
+    if not final and api_errors:                 # API 장애로 0건이면 '기사 없음'처럼 보이지 않게 오류를 올린다
+        raise api_errors[-1]
 
     items = [NewsItem(id=f"n{i + 1}", title=c.title, url=c.url, source=domain_of(c.url), published_at=c.published_at,
                       aspect=c.aspect, materiality=c.materiality, score=round(c.score, 4),
