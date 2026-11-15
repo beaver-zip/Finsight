@@ -19,7 +19,7 @@ from datetime import date
 from functools import lru_cache
 
 from app.domain.binding import substitute, tooltip
-from app.domain.fmt import md
+from app.domain.fmt import Units, md
 from app.domain.fmt import signed as sgn      # numf의 인자 이름 signed와 겹치지 않게
 from app.domain.models import Block, Headline, Metric, ReportDraft
 from app.settings import BACKEND_DIR
@@ -158,19 +158,6 @@ def _box(x, y, w, h, anchor):
 
 def _overlap(a, b) -> bool:
     return not (a[2] <= b[0] or b[2] <= a[0] or a[3] <= b[1] or b[3] <= a[1])
-
-
-class Units:
-    """차트 금액 단위: 큰 회사는 조원, 나머지는 억원."""
-
-    def __init__(self, big: bool):
-        self.div, self.word, self.d = (1e12, "조원", 1) if big else (1e8, "억원", 0)
-
-    def v(self, x: float | None) -> float:
-        return (x or 0) / self.div
-
-    def full(self, x: float | None) -> str:
-        return "–" if x is None else f"{x / self.div:,.{self.d}f}{self.word}"
 
 
 # ---------------- 차트

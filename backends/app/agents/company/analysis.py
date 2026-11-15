@@ -16,7 +16,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from app.agents.company.collect import Collected
-from app.core.dart.history import QRow, prev_quarter, qkey
+from app.core.dart.history import RC_Q, QRow, prev_quarter, qkey
 from app.core.peers import PeerRow
 from app.domain import fmt
 from app.domain.accounts import CASH_LIKE, DEBT_LIKE
@@ -159,7 +159,7 @@ def analyze(inp: Inputs) -> ReportData:
     sections = [("key", _key_data), ("latest", _latest), ("op", _op_chart), ("opm", _opm_history), ("annual", _annual),
                 ("quarters", _quarter_table), ("segments", _segments), ("valuation", _valuation),
                 ("peers", _peers), ("cash", _cash), ("events", _events), ("rel", _rel), ("news", _news_disc)]
-    ctx = dict(inp=inp, F=F, data=data, rows=rows, qs=qs, by=by, by_all=by_all, L=L, pre=pre, name=name)
+    ctx = dict(inp=inp, F=F, data=data, rows=rows, qs=qs, by=by, by_all=by_all, L=L, pre=pre, name=name, u=fmt.Units(big))
     for nm, fn in sections:
         try:
             fn(ctx)
@@ -218,7 +218,7 @@ def _key_data(c: dict) -> None:
     for lab, days in (("1M", 30), ("3M", 91), ("6M", 182)):
         r = ret_between(px, days)
         F.add(f"ret{lab}", "now", f"{lab} 주가 수익률", fmt.spct(r), r, "%")
-    fq = (inp.filing.bsns_year, _q_of(inp.filing.reprt_code))
+    fq = (inp.filing.bsns_year, RC_Q[inp.filing.reprt_code])
     sh = inp.shares.get(fq)
     mcap, mcap_txt = None, "–"
     if sh:
@@ -237,10 +237,6 @@ def _key_data(c: dict) -> None:
          "sub": "보통주·우선주 합산" if (sh and sh.pref_out and inp.pref_px) else "보통주"},
     ]
     c["key_tail"] = {"r12": r12, "rel12": rel12, "hi": hi, "lo": lo, "index": inp.index_name}
-
-
-def _q_of(rc: str) -> int:
-    return {"11013": 1, "11012": 2, "11014": 3, "11011": 4}[rc]
 
 
 # ---------------- 최근 분기
@@ -387,7 +383,7 @@ def _op_chart(c: dict) -> None:
     if cons:
         legend.append([f"{L.key.rstrip('P')} 컨센서스", "line", "ink"])
     data.charts["op"] = {"keys": [k for k, _ in pts], "vals": [v for _, v in pts], "cons": cons, "label": lab,
-                         "title": title, "subtitle": f"분기 영업이익, {_unit_word(data)}", "legend": legend,
+                         "title": title, "subtitle": f"분기 영업이익, {c['u'].word}", "legend": legend,
                          "source": data.tables.get("latest", {}).get("source", c["name"])}
 
 
@@ -441,7 +437,7 @@ def _ni_hero(c: dict) -> None:
     title = (f"분기 순이익이 {first}년 이후 가장 많다" if rank == 1 else
              f"분기 순이익 {fmt.money(vals[-1])}, {len(vals)}개 분기 중 {rank}위")
     data.charts["hero"] = {"kind": "ni", "keys": keys, "vals": vals, "label": data.latest["label"], "title": title,
-                           "subtitle": f"분기 지배주주 순이익, {_unit_word(data)}", "source": c["name"]}
+                           "subtitle": f"분기 지배주주 순이익, {c['u'].word}", "source": c["name"]}
 
 
 # ---------------- 연간 표
@@ -666,8 +662,8 @@ def _segments(c: dict) -> None:
         title = f"영업이익의 {share:.1f}%가 {short(main)}"
     else:
         title = "부문별 영업이익"
-    data.charts["segments"] = {"keys": keys, "series": series, "title": title, "subtitle": f"부문별 분기 영업이익, {_unit_word(data)}",
-                               "focal_label": f"{short(main)} {_u(seg_last[main]['op'], data)}",
+    data.charts["segments"] = {"keys": keys, "series": series, "title": title, "subtitle": f"부문별 분기 영업이익, {c['u'].word}",
+                               "focal_label": f"{short(main)} {c['u'].s(seg_last[main]['op'])}",
                                "neg_label": f"{short(second)} {fmt.money_abs(s2['op'])} 적자" if s2["op"] < 0 else None,
                                "source": c["name"]}
     # 분기 표에 부문 줄 끼우기
@@ -680,14 +676,6 @@ def _segments(c: dict) -> None:
         rev_sub = [{"head": short(n), "cells": segrow(n, "rev"), "sub": True, "tip": tip} for n in (main, second)]
         op_sub = [{"head": short(n), "cells": segrow(n, "op"), "sub": True, "tip": tip} for n in [main, second] + others]
         t["rows"] = [t["rows"][0]] + rev_sub + [t["rows"][1]] + op_sub + t["rows"][2:]
-
-
-def _unit_word(data: ReportData) -> str:
-    return "조원" if data.table_div == 1e9 else "억원"
-
-
-def _u(v: float, data: ReportData) -> str:
-    return f"{v / 1e12:,.1f}" if data.table_div == 1e9 else f"{v / 1e8:,.0f}"
 
 
 # ---------------- 밸류에이션(PBR 밴드·PER)
@@ -779,7 +767,7 @@ def _peers(c: dict) -> None:
     others = [r for r in rows if not r.is_self]
     if me is None or not others:
         return
-    k = _split_factor(inp, _q_end((inp.filing.bsns_year, _q_of(inp.filing.reprt_code))))
+    k = _split_factor(inp, _q_end((inp.filing.bsns_year, RC_Q[inp.filing.reprt_code])))
     if k != 1:          # 자기 행은 공시 주식 수 × 분할 뒤 시세라, 핵심 수치와 같은 기준으로 맞춘다(피어는 core/peers.py 참고)
         me = dataclasses.replace(me, mcap=me.mcap * k, pbr=me.pbr * k if me.pbr else None,
                                  per=me.per * k if me.per else None, per_rr=me.per_rr * k if me.per_rr else None)
@@ -827,7 +815,7 @@ def _peers(c: dict) -> None:
 # ---------------- 현금흐름·주주환원
 def _cash(c: dict) -> None:
     inp, F, data, qs = c["inp"], c["F"], c["data"], c["qs"]
-    y, q = inp.filing.bsns_year, _q_of(inp.filing.reprt_code)
+    y, q = inp.filing.bsns_year, RC_Q[inp.filing.reprt_code]
     fy_last = y if q == 4 else y - 1
     cols = [(fy_last - 2, 4), (fy_last - 1, 4), (fy_last, 4)]
     if q < 4:
@@ -932,13 +920,13 @@ def _cash(c: dict) -> None:
     else:
         title = "잉여현금흐름과 순현금"
     data.charts["cash"] = {"cols": [[lab(k), vals[k]["fcf"], vals[k]["net_cash"]] for k in fy_cols],
-                           "title": title, "subtitle": f"잉여현금흐름과 기말 순현금, {_unit_word(data)}", "source": c["name"]}
+                           "title": title, "subtitle": f"잉여현금흐름과 기말 순현금, {c['u'].word}", "source": c["name"]}
 
 
 def _shareholder(c: dict, cur: tuple[int, int], fy_last: int) -> None:
     """발행주식수 감소와 진행 중인 자기주식 취득. 금융업에서도 쓴다."""
     inp, F = c["inp"], c["F"]
-    y, q = inp.filing.bsns_year, _q_of(inp.filing.reprt_code)
+    y, q = inp.filing.bsns_year, RC_Q[inp.filing.reprt_code]
     # 발행주식수 감소(소각)
     base_y = fy_last - 1
     nk = cur if cur in inp.shares else (y, q)

@@ -103,3 +103,19 @@ def md(d: date | str) -> str:
 
 def tbl(x: float | None, div: float, d: int = 0) -> str:
     return "–" if x is None else f"{x / div:,.{d}f}"
+
+
+class Units:
+    """차트 금액 단위: 큰 회사는 조원, 나머지는 억원."""
+
+    def __init__(self, big: bool):
+        self.div, self.word, self.d = (1e12, "조원", 1) if big else (1e8, "억원", 0)
+
+    def v(self, x: float | None) -> float:
+        return (x or 0) / self.div
+
+    def s(self, x: float | None) -> str:
+        return "–" if x is None else f"{x / self.div:,.{self.d}f}"
+
+    def full(self, x: float | None) -> str:
+        return "–" if x is None else f"{x / self.div:,.{self.d}f}{self.word}"
