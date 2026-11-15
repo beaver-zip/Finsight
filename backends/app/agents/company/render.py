@@ -657,12 +657,12 @@ def news_html(news: list[dict], disc: list[dict]) -> str:
     if news:
         items = "".join(
             f'<li><span class="no">{n["no"]}</span><div><p class="meta">{esc(n.get("outlet") or "")}, {esc(_md(n.get("date")))}</p>'
-            f'<a href="{_safe_url(n.get("url"))}">{esc(n.get("title") or "")}</a>'
+            f'<a href="{_safe_url(n.get("url"))}" target="_blank" rel="noopener noreferrer">{esc(n.get("title") or "")}</a>'
             + (f'<p class="gist">{esc(n["gist"])}</p>' if n.get("gist") else "") + "</div></li>" for n in news)
         out.append(f'<h3 class="lt">주요 뉴스</h3><ol class="news">{items}</ol>')
     if disc:
         items = "".join(
-            f'<li><p class="meta">{esc(_md(d.get("date")))}</p><a href="{_safe_url(d.get("url"))}">{esc(d.get("title") or "")}</a>'
+            f'<li><p class="meta">{esc(_md(d.get("date")))}</p><a href="{_safe_url(d.get("url"))}" target="_blank" rel="noopener noreferrer">{esc(d.get("title") or "")}</a>'
             + (f'<p class="gist">{esc(d["gist"])}</p>' if d.get("gist") else "") + "</li>" for d in disc)
         out.append(f'<h3 class="lt">최근 공시</h3><ul class="news disc">{items}</ul>')
     return "".join(out)

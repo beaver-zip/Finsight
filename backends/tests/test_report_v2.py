@@ -9,7 +9,7 @@ import pytest
 
 from app.agents.company import writer
 from app.agents.company.analysis import Consensus, Inputs, analyze, clean_title, ret_between
-from app.agents.company.render import Text, render_report, table_html, ticks
+from app.agents.company.render import Text, news_html, render_report, table_html, ticks
 from app.core.dart.history import QRow, qkey
 from app.core.dart.prelim import Prelim, PrelimFiling, PrelimRow
 from app.core.dart.shares import BuybackDecision, Dividend, Shares
@@ -376,6 +376,15 @@ def test_text_citations_and_unknown_slot():
                                                "title": "기사"}])
     out = tx("영업이익 {{op.x}}[n4][n9] 그리고 {{zz.x}}")
     assert ">2</sup>" in out and "n9" not in out and "–" in out
+
+
+def test_render_escapes_llm_text_and_blocks_unsafe_links():
+    assert "<img" not in Text({}, [])("<img src=x onerror=alert(1)>")
+    out = news_html([{"no": 1, "id": "n1", "title": "<script>x</script>", "url": "javascript:alert(1)"}],
+                    [{"title": "<b>", "url": "javascript:x"}, {"title": "공시", "url": "https://dart.fss.or.kr/x"}])
+    assert "<script" not in out and "javascript:" not in out and "<b>" not in out
+    # 프론트가 링크 속성을 붙이지 않으므로 외부 링크는 HTML에서 새 탭·noopener로 연다
+    assert out.count('target="_blank" rel="noopener noreferrer"') == 3
 
 
 def test_ticks_and_table_cells():
